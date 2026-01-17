@@ -102,6 +102,18 @@ Tide Commander provides a visual interface for managing multiple Claude Code CLI
 └─────────────────────────────────────────┘
 ```
 
+### Data Storage
+
+**Server State** is saved to `~/.local/share/tide-commander/`:
+- `agents.json` - Agent configurations (name, position, session mapping, token usage)
+- `areas.json` - Drawing areas synced from the frontend
+- `supervisor-history.json` - Agent supervisor history
+
+**Claude Conversations** are read from `~/.claude/projects/`:
+- Claude Code stores session files as JSONL (one JSON object per line)
+- Directory names encode the working directory path (e.g., `/home/user/project` → `-home-user-project`)
+- Tide Commander reads these to resume sessions and display conversation history
+
 ## 🛠️ Development
 
 ```bash
