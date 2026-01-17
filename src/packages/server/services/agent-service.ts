@@ -4,7 +4,7 @@
  */
 
 import * as fs from 'fs';
-import type { Agent, AgentClass } from '../../shared/types.js';
+import type { Agent, AgentClass, PermissionMode } from '../../shared/types.js';
 import { loadAgents, saveAgents, getDataDir } from '../data/index.js';
 import {
   listSessions,
@@ -32,6 +32,11 @@ export function initAgents(): void {
   try {
     const storedAgents = loadAgents();
     for (const stored of storedAgents) {
+      const contextLimit = stored.contextLimit ?? 200000;
+      const tokensUsed = stored.tokensUsed ?? 0;
+      // Just use tokensUsed as contextUsed - it's a good proxy for conversation fullness
+      const contextUsed = tokensUsed;
+
       const agent: Agent = {
         ...stored,
         status: 'idle', // Ready to receive commands
@@ -39,9 +44,10 @@ export function initAgents(): void {
         currentTask: undefined,
         currentTool: undefined,
         // Ensure context fields have defaults (migration for existing agents)
-        contextUsed: stored.contextUsed ?? 0,
-        contextLimit: stored.contextLimit ?? 200000,
+        contextUsed,
+        contextLimit,
         taskCount: stored.taskCount ?? 0, // Migration for existing agents
+        permissionMode: stored.permissionMode ?? 'bypass', // Migration for existing agents
         // Initialize empty pending commands queue
         pendingCommands: [],
       };
@@ -92,7 +98,8 @@ export async function createAgent(
   cwd: string,
   position?: { x: number; y: number; z: number },
   sessionId?: string,
-  useChrome?: boolean
+  useChrome?: boolean,
+  permissionMode: PermissionMode = 'bypass'
 ): Promise<Agent> {
   const id = generateId();
 
@@ -116,6 +123,7 @@ export async function createAgent(
     tmuxSession: `tide-${id}`,
     cwd,
     useChrome,
+    permissionMode,
     tokensUsed: 0,
     contextUsed: 0,
     contextLimit: 200000, // Claude's default context limit

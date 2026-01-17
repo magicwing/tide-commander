@@ -10,7 +10,16 @@ import type {
   SupervisorConfig,
   AgentSupervisorHistory,
   AgentSupervisorHistoryEntry,
+  Building,
+  BuildingType,
+  BuildingStatus,
+  PermissionMode,
+  PermissionRequest,
+  DelegationDecision,
 } from '../../shared/types';
+import { ShortcutConfig, DEFAULT_SHORTCUTS } from './shortcuts';
+export type { ShortcutConfig } from './shortcuts';
+export { DEFAULT_SHORTCUTS, matchesShortcut, formatShortcut } from './shortcuts';
 
 // Activity type
 export interface Activity {
@@ -63,6 +72,9 @@ const DEFAULT_SETTINGS: Settings = {
   hideCost: true,
 };
 
+// localStorage keys
+const SHORTCUTS_STORAGE_KEY = 'tide-commander-shortcuts';
+
 // Supervisor state
 export interface SupervisorState {
   enabled: boolean;
@@ -74,6 +86,8 @@ export interface SupervisorState {
   agentHistories: Map<string, AgentSupervisorHistoryEntry[]>;
   // Track which agent's history is currently being loaded
   loadingHistoryForAgent: string | null;
+  // Track which agents have had their full history fetched from the server
+  historyFetchedForAgents: Set<string>;
   // Track if a report is being generated
   generatingReport: boolean;
 }
@@ -88,6 +102,10 @@ export interface StoreState {
   areas: Map<string, DrawingArea>;
   activeTool: DrawingTool;
   selectedAreaId: string | null;
+  // Buildings
+  buildings: Map<string, Building>;
+  selectedBuildingId: string | null;
+  buildingLogs: Map<string, string[]>; // Building ID -> logs
   // Claude outputs per agent
   agentOutputs: Map<string, ClaudeOutput[]>;
   // Last prompt per agent
@@ -100,10 +118,18 @@ export interface StoreState {
   terminalOpen: boolean;
   // Settings
   settings: Settings;
+  // Keyboard shortcuts
+  shortcuts: ShortcutConfig[];
   // File viewer path (to open files from other components)
   fileViewerPath: string | null;
   // Supervisor state
   supervisor: SupervisorState;
+  // Permission requests (interactive permission mode)
+  permissionRequests: Map<string, PermissionRequest>;
+  // Boss delegation history (per boss agent)
+  delegationHistories: Map<string, DelegationDecision[]>;
+  // Pending delegation (when boss is deciding)
+  pendingDelegation: { bossId: string; command: string } | null;
 }
 
 // Store actions
@@ -122,6 +148,10 @@ class Store {
     areas: new Map(),
     activeTool: null,
     selectedAreaId: null,
+    // Buildings
+    buildings: new Map(),
+    selectedBuildingId: null,
+    buildingLogs: new Map(),
     // Claude outputs
     agentOutputs: new Map(),
     // Last prompts
@@ -143,6 +173,24 @@ class Store {
       }
       return { ...DEFAULT_SETTINGS };
     })(),
+    // Keyboard shortcuts - load from localStorage or use defaults
+    shortcuts: (() => {
+      try {
+        const stored = localStorage.getItem(SHORTCUTS_STORAGE_KEY);
+        if (stored) {
+          const parsed = JSON.parse(stored) as ShortcutConfig[];
+          // Merge with defaults to handle new shortcuts added in updates
+          const mergedShortcuts = DEFAULT_SHORTCUTS.map(defaultShortcut => {
+            const saved = parsed.find(s => s.id === defaultShortcut.id);
+            return saved ? { ...defaultShortcut, ...saved } : defaultShortcut;
+          });
+          return mergedShortcuts;
+        }
+      } catch (e) {
+        console.error('Failed to load shortcuts:', e);
+      }
+      return [...DEFAULT_SHORTCUTS];
+    })(),
     // File viewer path
     fileViewerPath: null,
     // Supervisor state
@@ -154,8 +202,14 @@ class Store {
       nextReportTime: null,
       agentHistories: new Map(),
       loadingHistoryForAgent: null,
+      historyFetchedForAgents: new Set(),
       generatingReport: false,
     },
+    // Permission requests
+    permissionRequests: new Map(),
+    // Boss delegation
+    delegationHistories: new Map(),
+    pendingDelegation: null,
   };
 
   private listeners = new Set<Listener>();
@@ -374,6 +428,8 @@ class Store {
     const newHistories = new Map(this.state.supervisor.agentHistories);
     newHistories.set(history.agentId, history.entries);
     this.state.supervisor.agentHistories = newHistories;
+    // Mark this agent's history as fully fetched
+    this.state.supervisor.historyFetchedForAgents.add(history.agentId);
     if (this.state.supervisor.loadingHistoryForAgent === history.agentId) {
       this.state.supervisor.loadingHistoryForAgent = null;
     }
@@ -421,6 +477,11 @@ class Store {
     return this.state.supervisor.loadingHistoryForAgent === agentId;
   }
 
+  // Check if full history has been fetched for an agent
+  hasHistoryBeenFetched(agentId: string): boolean {
+    return this.state.supervisor.historyFetchedForAgents.has(agentId);
+  }
+
   // Settings
   updateSettings(updates: Partial<Settings>): void {
     this.state.settings = { ...this.state.settings, ...updates };
@@ -434,6 +495,43 @@ class Store {
 
   getSettings(): Settings {
     return this.state.settings;
+  }
+
+  // ===== Keyboard Shortcuts =====
+
+  getShortcuts(): ShortcutConfig[] {
+    return this.state.shortcuts;
+  }
+
+  getShortcut(id: string): ShortcutConfig | undefined {
+    return this.state.shortcuts.find(s => s.id === id);
+  }
+
+  updateShortcut(id: string, updates: Partial<ShortcutConfig>): void {
+    const index = this.state.shortcuts.findIndex(s => s.id === id);
+    if (index !== -1) {
+      this.state.shortcuts = [
+        ...this.state.shortcuts.slice(0, index),
+        { ...this.state.shortcuts[index], ...updates },
+        ...this.state.shortcuts.slice(index + 1),
+      ];
+      this.saveShortcuts();
+      this.notify();
+    }
+  }
+
+  resetShortcuts(): void {
+    this.state.shortcuts = [...DEFAULT_SHORTCUTS];
+    this.saveShortcuts();
+    this.notify();
+  }
+
+  private saveShortcuts(): void {
+    try {
+      localStorage.setItem(SHORTCUTS_STORAGE_KEY, JSON.stringify(this.state.shortcuts));
+    } catch (e) {
+      console.error('Failed to save shortcuts:', e);
+    }
   }
 
   // Activity feed
@@ -528,12 +626,13 @@ class Store {
     cwd: string,
     position?: { x: number; z: number },
     sessionId?: string,
-    useChrome?: boolean
+    useChrome?: boolean,
+    permissionMode?: PermissionMode
   ): void {
     const pos3d = position ? { x: position.x, y: 0, z: position.z } : undefined;
     this.sendMessage?.({
       type: 'spawn_agent',
-      payload: { name, class: agentClass, cwd, position: pos3d, sessionId, useChrome },
+      payload: { name, class: agentClass, cwd, position: pos3d, sessionId, useChrome, permissionMode },
     });
   }
 
@@ -833,6 +932,148 @@ class Store {
     this.notify();
   }
 
+  // ===== Buildings =====
+
+  // Select building
+  selectBuilding(buildingId: string | null): void {
+    this.state.selectedBuildingId = buildingId;
+    this.notify();
+  }
+
+  // Add new building
+  addBuilding(building: Building): void {
+    const newBuildings = new Map(this.state.buildings);
+    newBuildings.set(building.id, building);
+    this.state.buildings = newBuildings;
+    this.syncBuildingsToServer();
+    this.notify();
+  }
+
+  // Update existing building
+  updateBuilding(buildingId: string, updates: Partial<Building>): void {
+    const building = this.state.buildings.get(buildingId);
+    if (building) {
+      const newBuildings = new Map(this.state.buildings);
+      newBuildings.set(buildingId, { ...building, ...updates });
+      this.state.buildings = newBuildings;
+      this.syncBuildingsToServer();
+      this.notify();
+    }
+  }
+
+  // Delete building
+  deleteBuilding(buildingId: string): void {
+    const newBuildings = new Map(this.state.buildings);
+    newBuildings.delete(buildingId);
+    this.state.buildings = newBuildings;
+    if (this.state.selectedBuildingId === buildingId) {
+      this.state.selectedBuildingId = null;
+    }
+    this.syncBuildingsToServer();
+    this.notify();
+  }
+
+  // Move building
+  moveBuilding(buildingId: string, position: { x: number; z: number }): void {
+    const building = this.state.buildings.get(buildingId);
+    if (building) {
+      const newBuildings = new Map(this.state.buildings);
+      newBuildings.set(buildingId, { ...building, position });
+      this.state.buildings = newBuildings;
+      this.syncBuildingsToServer();
+      this.notify();
+    }
+  }
+
+  // Alias for moveBuilding (used by drag handlers)
+  updateBuildingPosition(buildingId: string, position: { x: number; z: number }): void {
+    this.moveBuilding(buildingId, position);
+  }
+
+  // Create a new building (generates ID and timestamps)
+  createBuilding(data: Omit<Building, 'id' | 'createdAt' | 'status'>): void {
+    const building: Building = {
+      ...data,
+      id: `building_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      status: 'stopped',
+      createdAt: Date.now(),
+    };
+    this.addBuilding(building);
+  }
+
+  // Send building command (start/stop/restart/logs)
+  sendBuildingCommand(buildingId: string, command: 'start' | 'stop' | 'restart' | 'healthCheck' | 'logs'): void {
+    this.sendMessage?.({
+      type: 'building_command',
+      payload: { buildingId, command },
+    });
+  }
+
+  // Add logs for a building
+  addBuildingLogs(buildingId: string, logs: string): void {
+    const existingLogs = this.state.buildingLogs.get(buildingId) || [];
+    const newLogs = [...existingLogs, logs];
+    // Keep last 500 log entries
+    if (newLogs.length > 500) {
+      newLogs.splice(0, newLogs.length - 500);
+    }
+    const newBuildingLogs = new Map(this.state.buildingLogs);
+    newBuildingLogs.set(buildingId, newLogs);
+    this.state.buildingLogs = newBuildingLogs;
+    this.notify();
+  }
+
+  // Get logs for a building
+  getBuildingLogs(buildingId: string): string[] {
+    return this.state.buildingLogs.get(buildingId) || [];
+  }
+
+  // Clear logs for a building
+  clearBuildingLogs(buildingId: string): void {
+    const newBuildingLogs = new Map(this.state.buildingLogs);
+    newBuildingLogs.delete(buildingId);
+    this.state.buildingLogs = newBuildingLogs;
+    this.notify();
+  }
+
+  // Sync buildings to server via WebSocket
+  private syncBuildingsToServer(): void {
+    const buildingsArray = Array.from(this.state.buildings.values());
+    this.sendMessage?.({
+      type: 'sync_buildings',
+      payload: buildingsArray,
+    });
+  }
+
+  // Set buildings from server (called when receiving buildings_update message)
+  setBuildingsFromServer(buildingsArray: Building[]): void {
+    const newBuildings = new Map<string, Building>();
+    for (const building of buildingsArray) {
+      newBuildings.set(building.id, building);
+    }
+    this.state.buildings = newBuildings;
+    this.notify();
+  }
+
+  // Update a single building from server
+  updateBuildingFromServer(building: Building): void {
+    const newBuildings = new Map(this.state.buildings);
+    newBuildings.set(building.id, building);
+    this.state.buildings = newBuildings;
+    this.notify();
+  }
+
+  // Remove building from server update
+  removeBuildingFromServer(buildingId: string): void {
+    const newBuildings = new Map(this.state.buildings);
+    newBuildings.delete(buildingId);
+    this.state.buildings = newBuildings;
+    if (this.state.selectedBuildingId === buildingId) {
+      this.state.selectedBuildingId = null;
+    }
+    this.notify();
+  }
+
   // ===== Status Polling =====
   // NOTE: HTTP polling is disabled - WebSocket handles all status updates now
   // The sync happens on WebSocket connect (server-side) and on agent events
@@ -899,6 +1140,215 @@ class Store {
     } catch (err) {
       // Silently fail - this is just a fallback
     }
+  }
+
+  // ============================================================================
+  // Permission Requests
+  // ============================================================================
+
+  addPermissionRequest(request: PermissionRequest): void {
+    const newRequests = new Map(this.state.permissionRequests);
+    newRequests.set(request.id, request);
+    this.state.permissionRequests = newRequests;
+    this.notify();
+  }
+
+  resolvePermissionRequest(requestId: string, approved: boolean): void {
+    const newRequests = new Map(this.state.permissionRequests);
+    const request = newRequests.get(requestId);
+    if (request) {
+      newRequests.set(requestId, {
+        ...request,
+        status: approved ? 'approved' : 'denied',
+      });
+      // Remove after a short delay to show the result
+      setTimeout(() => {
+        const currentRequests = new Map(this.state.permissionRequests);
+        currentRequests.delete(requestId);
+        this.state.permissionRequests = currentRequests;
+        this.notify();
+      }, 2000);
+    }
+    this.state.permissionRequests = newRequests;
+    this.notify();
+  }
+
+  respondToPermissionRequest(requestId: string, approved: boolean, reason?: string, remember?: boolean): void {
+    this.sendMessage?.({
+      type: 'permission_response',
+      payload: { requestId, approved, reason, remember },
+    });
+  }
+
+  getPendingPermissionsForAgent(agentId: string): PermissionRequest[] {
+    return Array.from(this.state.permissionRequests.values())
+      .filter((r) => r.agentId === agentId && r.status === 'pending');
+  }
+
+  // ============================================================================
+  // Boss Agent Methods
+  // ============================================================================
+
+  /**
+   * Spawn a boss agent
+   */
+  spawnBossAgent(
+    name: string,
+    cwd: string,
+    position?: { x: number; z: number },
+    subordinateIds?: string[],
+    useChrome?: boolean,
+    permissionMode?: PermissionMode
+  ): void {
+    const pos3d = position ? { x: position.x, y: 0, z: position.z } : undefined;
+    this.sendMessage?.({
+      type: 'spawn_boss_agent',
+      payload: { name, cwd, position: pos3d, subordinateIds, useChrome, permissionMode },
+    });
+  }
+
+  /**
+   * Assign subordinates to a boss
+   */
+  assignSubordinates(bossId: string, subordinateIds: string[]): void {
+    this.sendMessage?.({
+      type: 'assign_subordinates',
+      payload: { bossId, subordinateIds },
+    });
+  }
+
+  /**
+   * Remove a subordinate from a boss
+   */
+  removeSubordinate(bossId: string, subordinateId: string): void {
+    this.sendMessage?.({
+      type: 'remove_subordinate',
+      payload: { bossId, subordinateId },
+    });
+  }
+
+  /**
+   * Send command to boss for delegation
+   */
+  sendBossCommand(bossId: string, command: string): void {
+    this.state.pendingDelegation = { bossId, command };
+    this.notify();
+
+    this.sendMessage?.({
+      type: 'send_boss_command',
+      payload: { bossId, command },
+    });
+  }
+
+  /**
+   * Request delegation history for a boss
+   */
+  requestDelegationHistory(bossId: string): void {
+    this.sendMessage?.({
+      type: 'request_delegation_history',
+      payload: { bossId },
+    });
+  }
+
+  /**
+   * Handle delegation decision from server
+   */
+  handleDelegationDecision(decision: DelegationDecision): void {
+    // Add to history
+    const newHistories = new Map(this.state.delegationHistories);
+    const bossHistory = newHistories.get(decision.bossId) || [];
+
+    // Update or add decision
+    const existingIdx = bossHistory.findIndex(d => d.id === decision.id);
+    if (existingIdx !== -1) {
+      bossHistory[existingIdx] = decision;
+    } else {
+      bossHistory.unshift(decision);
+      // Keep last 100 decisions
+      if (bossHistory.length > 100) {
+        bossHistory.pop();
+      }
+    }
+    newHistories.set(decision.bossId, bossHistory);
+    this.state.delegationHistories = newHistories;
+
+    // Clear pending if this is the result
+    if (
+      this.state.pendingDelegation?.bossId === decision.bossId &&
+      decision.status !== 'pending'
+    ) {
+      this.state.pendingDelegation = null;
+    }
+
+    this.notify();
+  }
+
+  /**
+   * Set full delegation history from server
+   */
+  setDelegationHistory(bossId: string, decisions: DelegationDecision[]): void {
+    const newHistories = new Map(this.state.delegationHistories);
+    newHistories.set(bossId, decisions);
+    this.state.delegationHistories = newHistories;
+    this.notify();
+  }
+
+  /**
+   * Get delegation history for a boss
+   */
+  getDelegationHistory(bossId: string): DelegationDecision[] {
+    return this.state.delegationHistories.get(bossId) || [];
+  }
+
+  /**
+   * Update boss subordinates from server event
+   */
+  updateBossSubordinates(bossId: string, subordinateIds: string[]): void {
+    const boss = this.state.agents.get(bossId);
+    if (boss) {
+      const updatedBoss = { ...boss, subordinateIds };
+      const newAgents = new Map(this.state.agents);
+      newAgents.set(bossId, updatedBoss);
+      this.state.agents = newAgents;
+      this.notify();
+    }
+  }
+
+  /**
+   * Get subordinates for a boss agent
+   */
+  getSubordinates(bossId: string): Agent[] {
+    const boss = this.state.agents.get(bossId);
+    if (!boss || boss.class !== 'boss' || !boss.subordinateIds) return [];
+
+    return boss.subordinateIds
+      .map(id => this.state.agents.get(id))
+      .filter((agent): agent is Agent => agent !== undefined);
+  }
+
+  /**
+   * Check if an agent is a boss
+   */
+  isBossAgent(agentId: string): boolean {
+    const agent = this.state.agents.get(agentId);
+    return agent?.class === 'boss';
+  }
+
+  /**
+   * Get the boss for an agent (if any)
+   */
+  getBossForAgent(agentId: string): Agent | null {
+    const agent = this.state.agents.get(agentId);
+    if (!agent?.bossId) return null;
+    return this.state.agents.get(agent.bossId) || null;
+  }
+
+  /**
+   * Get all non-boss agents (potential subordinates)
+   */
+  getAvailableSubordinates(): Agent[] {
+    return Array.from(this.state.agents.values())
+      .filter(agent => agent.class !== 'boss');
   }
 }
 

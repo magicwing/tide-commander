@@ -1,5 +1,5 @@
 // Agent Classes
-export type AgentClass = 'scout' | 'builder' | 'debugger' | 'architect' | 'warrior' | 'support';
+export type AgentClass = 'scout' | 'builder' | 'debugger' | 'architect' | 'warrior' | 'support' | 'boss';
 
 export const AGENT_CLASSES: Record<AgentClass, { icon: string; color: string; description: string }> = {
   scout: { icon: '🔍', color: '#4a9eff', description: 'Codebase exploration, file discovery' },
@@ -8,10 +8,19 @@ export const AGENT_CLASSES: Record<AgentClass, { icon: string; color: string; de
   architect: { icon: '📐', color: '#9e4aff', description: 'Planning, design decisions' },
   warrior: { icon: '⚔️', color: '#ff4a9e', description: 'Aggressive refactoring, migrations' },
   support: { icon: '💚', color: '#4aff9e', description: 'Documentation, tests, cleanup' },
+  boss: { icon: '👑', color: '#ffd700', description: 'Team leader, delegates tasks to subordinates' },
 };
 
 // Agent Status
-export type AgentStatus = 'idle' | 'working' | 'waiting' | 'error' | 'offline';
+export type AgentStatus = 'idle' | 'working' | 'waiting' | 'waiting_permission' | 'error' | 'offline';
+
+// Permission Mode - controls how Claude asks for permissions
+export type PermissionMode = 'bypass' | 'interactive';
+
+export const PERMISSION_MODES: Record<PermissionMode, { label: string; description: string }> = {
+  bypass: { label: 'Permissionless', description: 'Skip all permission prompts (less safe, faster)' },
+  interactive: { label: 'Interactive', description: 'Ask for approval before sensitive operations' },
+};
 
 // Agent State
 export interface Agent {
@@ -28,6 +37,7 @@ export interface Agent {
   tmuxSession: string;
   cwd: string;
   useChrome?: boolean; // Start with --chrome flag
+  permissionMode: PermissionMode; // How permissions are handled
 
   // Resources
   tokensUsed: number;
@@ -51,10 +61,111 @@ export interface Agent {
   // Timestamps
   createdAt: number;
   lastActivity: number;
+
+  // Boss-specific fields (only populated when class === 'boss')
+  subordinateIds?: string[];           // IDs of agents under this boss
+  bossId?: string;                     // ID of the boss this agent reports to (if any)
 }
 
 // Drawing tool types
 export type DrawingTool = 'rectangle' | 'circle' | 'select' | null;
+
+// ============================================================================
+// Boss Agent Types
+// ============================================================================
+
+// Delegation decision record - tracks how boss routed a command
+export interface DelegationDecision {
+  id: string;
+  timestamp: number;
+  bossId: string;
+  userCommand: string;              // Original command from user
+  selectedAgentId: string;
+  selectedAgentName: string;
+  reasoning: string;                // LLM's explanation for the choice
+  alternativeAgents: string[];      // Other agents that were considered
+  confidence: 'high' | 'medium' | 'low';
+  status: 'pending' | 'sent' | 'completed' | 'failed';
+}
+
+// Context about a subordinate for delegation decision
+export interface SubordinateContext {
+  id: string;
+  name: string;
+  class: AgentClass;
+  status: AgentStatus;
+  currentTask?: string;
+  lastAssignedTask?: string;
+  recentSupervisorSummary?: string;  // Latest supervisor analysis
+  contextPercent: number;            // Context usage percentage
+  tokensUsed: number;
+}
+
+// ============================================================================
+// Building Types
+// ============================================================================
+
+// Building types - different kinds of buildings
+export type BuildingType = 'server' | 'link' | 'database' | 'docker' | 'monitor';
+
+export const BUILDING_TYPES: Record<BuildingType, { icon: string; color: string; description: string }> = {
+  server: { icon: '🖥️', color: '#4aff9e', description: 'Service with start/stop commands and logs' },
+  link: { icon: '🔗', color: '#4a9eff', description: 'Quick links to URLs' },
+  database: { icon: '🗄️', color: '#ff9e4a', description: 'Database connection and queries' },
+  docker: { icon: '🐳', color: '#4ac1ff', description: 'Docker container management' },
+  monitor: { icon: '📊', color: '#ff4a9e', description: 'System metrics and monitoring' },
+};
+
+// Building status
+export type BuildingStatus = 'running' | 'stopped' | 'error' | 'unknown' | 'starting' | 'stopping';
+
+// Building visual styles
+export type BuildingStyle = 'server-rack' | 'tower' | 'dome' | 'pyramid';
+
+export const BUILDING_STYLES: Record<BuildingStyle, { label: string; description: string }> = {
+  'server-rack': { label: 'Server Rack', description: 'Classic server rack with blinking LEDs' },
+  'tower': { label: 'Control Tower', description: 'Tall tower with rotating antenna' },
+  'dome': { label: 'Data Dome', description: 'Futuristic dome with energy ring' },
+  'pyramid': { label: 'Power Pyramid', description: 'Egyptian-style pyramid with glowing core' },
+};
+
+// Building configuration
+export interface Building {
+  id: string;
+  name: string;
+  type: BuildingType;
+  style: BuildingStyle;
+
+  // Position on battlefield
+  position: { x: number; z: number };
+
+  // Status
+  status: BuildingStatus;
+  lastHealthCheck?: number;
+  lastError?: string;
+
+  // Commands (for server type)
+  commands?: {
+    start?: string;
+    stop?: string;
+    restart?: string;
+    healthCheck?: string;
+    logs?: string;
+  };
+
+  // Working directory for commands
+  cwd?: string;
+
+  // Links (for link type, but can be used by any)
+  urls?: { label: string; url: string }[];
+
+  // Visual customization
+  color?: string;
+
+  // Timestamps
+  createdAt: number;
+  lastActivity?: number;
+}
 
 // Drawing area on the battlefield
 export interface DrawingArea {
@@ -180,6 +291,7 @@ export interface SpawnAgentMessage extends WSMessage {
     position?: { x: number; y: number; z: number };
     sessionId?: string;
     useChrome?: boolean;
+    permissionMode?: PermissionMode; // defaults to 'bypass' for backwards compatibility
   };
 }
 
@@ -415,6 +527,199 @@ export interface RequestAgentSupervisorHistoryMessage extends WSMessage {
   };
 }
 
+// ============================================================================
+// Building WebSocket Messages
+// ============================================================================
+
+// Buildings sync message (Server -> Client)
+export interface BuildingsUpdateMessage extends WSMessage {
+  type: 'buildings_update';
+  payload: Building[];
+}
+
+// Building created message (Server -> Client)
+export interface BuildingCreatedMessage extends WSMessage {
+  type: 'building_created';
+  payload: Building;
+}
+
+// Building updated message (Server -> Client)
+export interface BuildingUpdatedMessage extends WSMessage {
+  type: 'building_updated';
+  payload: Building;
+}
+
+// Building deleted message (Server -> Client)
+export interface BuildingDeletedMessage extends WSMessage {
+  type: 'building_deleted';
+  payload: { id: string };
+}
+
+// Building logs message (Server -> Client)
+export interface BuildingLogsMessage extends WSMessage {
+  type: 'building_logs';
+  payload: {
+    buildingId: string;
+    logs: string;
+    timestamp: number;
+  };
+}
+
+// Sync buildings message (Client -> Server)
+export interface SyncBuildingsMessage extends WSMessage {
+  type: 'sync_buildings';
+  payload: Building[];
+}
+
+// Create building message (Client -> Server)
+export interface CreateBuildingMessage extends WSMessage {
+  type: 'create_building';
+  payload: Omit<Building, 'id' | 'createdAt' | 'status'> & { status?: BuildingStatus };
+}
+
+// Update building message (Client -> Server)
+export interface UpdateBuildingMessage extends WSMessage {
+  type: 'update_building';
+  payload: { id: string; updates: Partial<Building> };
+}
+
+// Delete building message (Client -> Server)
+export interface DeleteBuildingMessage extends WSMessage {
+  type: 'delete_building';
+  payload: { id: string };
+}
+
+// Building command message (Client -> Server) - start/stop/restart/logs
+export interface BuildingCommandMessage extends WSMessage {
+  type: 'building_command';
+  payload: {
+    buildingId: string;
+    command: 'start' | 'stop' | 'restart' | 'healthCheck' | 'logs';
+  };
+}
+
+// ============================================================================
+// Permission Types
+// ============================================================================
+
+// Permission request from Claude (via hook)
+export interface PermissionRequest {
+  id: string;
+  agentId: string;
+  sessionId: string;
+  timestamp: number;
+  tool: string;
+  toolInput: Record<string, unknown>;
+  toolUseId: string;
+  status: 'pending' | 'approved' | 'denied';
+  // Human-readable description of what the tool wants to do
+  description?: string;
+}
+
+// Permission response from user
+export interface PermissionResponse {
+  requestId: string;
+  approved: boolean;
+  reason?: string; // Optional reason for denial
+  remember?: boolean; // Remember this pattern for future requests
+}
+
+// Permission WebSocket messages (Server -> Client)
+export interface PermissionRequestMessage extends WSMessage {
+  type: 'permission_request';
+  payload: PermissionRequest;
+}
+
+export interface PermissionResolvedMessage extends WSMessage {
+  type: 'permission_resolved';
+  payload: {
+    requestId: string;
+    approved: boolean;
+  };
+}
+
+// Permission WebSocket messages (Client -> Server)
+export interface PermissionResponseMessage extends WSMessage {
+  type: 'permission_response';
+  payload: PermissionResponse;
+}
+
+// ============================================================================
+// Boss Agent WebSocket Messages
+// ============================================================================
+
+// Spawn a boss agent (Client -> Server)
+export interface SpawnBossAgentMessage extends WSMessage {
+  type: 'spawn_boss_agent';
+  payload: {
+    name: string;
+    cwd: string;
+    position?: { x: number; y: number; z: number };
+    subordinateIds?: string[];  // Initial subordinates (optional)
+    useChrome?: boolean;
+    permissionMode?: PermissionMode;
+  };
+}
+
+// Assign subordinates to a boss (Client -> Server)
+export interface AssignSubordinatesMessage extends WSMessage {
+  type: 'assign_subordinates';
+  payload: {
+    bossId: string;
+    subordinateIds: string[];
+  };
+}
+
+// Remove subordinate from boss (Client -> Server)
+export interface RemoveSubordinateMessage extends WSMessage {
+  type: 'remove_subordinate';
+  payload: {
+    bossId: string;
+    subordinateId: string;
+  };
+}
+
+// Send command to boss for delegation (Client -> Server)
+export interface SendBossCommandMessage extends WSMessage {
+  type: 'send_boss_command';
+  payload: {
+    bossId: string;
+    command: string;
+  };
+}
+
+// Request delegation history (Client -> Server)
+export interface RequestDelegationHistoryMessage extends WSMessage {
+  type: 'request_delegation_history';
+  payload: {
+    bossId: string;
+  };
+}
+
+// Delegation decision notification (Server -> Client)
+export interface DelegationDecisionMessage extends WSMessage {
+  type: 'delegation_decision';
+  payload: DelegationDecision;
+}
+
+// Boss subordinates updated (Server -> Client)
+export interface BossSubordinatesUpdatedMessage extends WSMessage {
+  type: 'boss_subordinates_updated';
+  payload: {
+    bossId: string;
+    subordinateIds: string[];
+  };
+}
+
+// Delegation history response (Server -> Client)
+export interface DelegationHistoryMessage extends WSMessage {
+  type: 'delegation_history';
+  payload: {
+    bossId: string;
+    decisions: DelegationDecision[];
+  };
+}
+
 export type ServerMessage =
   | AgentsUpdateMessage
   | AgentCreatedMessage
@@ -432,7 +737,17 @@ export type ServerMessage =
   | NarrativeUpdateMessage
   | AgentSupervisorHistoryMessage
   | AgentAnalysisMessage
-  | AreasUpdateMessage;
+  | AreasUpdateMessage
+  | BuildingsUpdateMessage
+  | BuildingCreatedMessage
+  | BuildingUpdatedMessage
+  | BuildingDeletedMessage
+  | BuildingLogsMessage
+  | PermissionRequestMessage
+  | PermissionResolvedMessage
+  | DelegationDecisionMessage
+  | BossSubordinatesUpdatedMessage
+  | DelegationHistoryMessage;
 
 export type ClientMessage =
   | SpawnAgentMessage
@@ -446,4 +761,15 @@ export type ClientMessage =
   | SetSupervisorConfigMessage
   | RequestSupervisorReportMessage
   | RequestAgentSupervisorHistoryMessage
-  | SyncAreasMessage;
+  | SyncAreasMessage
+  | SyncBuildingsMessage
+  | CreateBuildingMessage
+  | UpdateBuildingMessage
+  | DeleteBuildingMessage
+  | BuildingCommandMessage
+  | PermissionResponseMessage
+  | SpawnBossAgentMessage
+  | AssignSubordinatesMessage
+  | RemoveSubordinateMessage
+  | SendBossCommandMessage
+  | RequestDelegationHistoryMessage;

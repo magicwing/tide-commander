@@ -67,6 +67,38 @@
   margin-top: 2px;
 }
 
+// New Building button variant
+.agent-bar-building-btn {
+  background: rgba($dracula-cyan, 0.15);
+  border-color: $dracula-cyan;
+
+  &:hover {
+    background: rgba($dracula-cyan, 0.3);
+    box-shadow: 0 4px 16px rgba($dracula-cyan, 0.3);
+  }
+
+  .agent-bar-spawn-icon,
+  .agent-bar-spawn-label {
+    color: $dracula-cyan;
+  }
+}
+
+// New Area button variant
+.agent-bar-area-btn {
+  background: rgba($dracula-purple, 0.15);
+  border-color: $dracula-purple;
+
+  &:hover {
+    background: rgba($dracula-purple, 0.3);
+    box-shadow: 0 4px 16px rgba($dracula-purple, 0.3);
+  }
+
+  .agent-bar-spawn-icon,
+  .agent-bar-spawn-label {
+    color: $dracula-purple;
+  }
+}
+
 // Agent group container with border
 .agent-bar-group {
   display: flex;

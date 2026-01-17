@@ -161,17 +161,11 @@ function handleEvent(agentId: string, event: StandardEvent): void {
       if (event.tokens) {
         const newTokens =
           (agent.tokensUsed || 0) + event.tokens.input + event.tokens.output;
-        // contextUsed is the total context window size
-        // This includes: input_tokens + cache_creation_input_tokens + cache_read_input_tokens
-        // This represents the full conversation context being used
-        const contextUsed =
-          event.tokens.input +
-          (event.tokens.cacheCreation || 0) +
-          (event.tokens.cacheRead || 0);
-        log.log(` Agent ${agentId} step_complete: input=${event.tokens.input}, output=${event.tokens.output}, cacheCreation=${event.tokens.cacheCreation}, cacheRead=${event.tokens.cacheRead}, contextUsed=${contextUsed}, cost=${event.cost}, setting to idle`);
+        // contextUsed = tokensUsed (total tokens as proxy for conversation fullness)
+        log.log(` Agent ${agentId} step_complete: input=${event.tokens.input}, output=${event.tokens.output}, cacheCreation=${event.tokens.cacheCreation}, cacheRead=${event.tokens.cacheRead}, newTokens=${newTokens}, cost=${event.cost}, setting to idle`);
         const updated = agentService.updateAgent(agentId, {
           tokensUsed: newTokens,
-          contextUsed: contextUsed,
+          contextUsed: newTokens,
           status: 'idle',
           currentTask: undefined,
           currentTool: undefined,
@@ -261,6 +255,7 @@ async function executeCommand(agentId: string, command: string): Promise<void> {
     workingDir: agent.cwd,
     sessionId: agent.sessionId,
     useChrome: agent.useChrome,
+    permissionMode: agent.permissionMode,
   });
 }
 

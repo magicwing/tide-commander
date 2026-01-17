@@ -31,7 +31,7 @@ export class ClaudeRunner {
    * Run a prompt for an agent
    */
   async run(request: RunnerRequest): Promise<void> {
-    const { agentId, prompt, workingDir, sessionId, model, useChrome } = request;
+    const { agentId, prompt, workingDir, sessionId, model, useChrome, permissionMode = 'bypass' } = request;
 
     // Kill existing process for this agent if any
     await this.stop(agentId);
@@ -41,7 +41,7 @@ export class ClaudeRunner {
       sessionId,
       model,
       workingDir,
-      permissionMode: 'bypass',
+      permissionMode,
       useChrome,
     });
 
@@ -59,6 +59,8 @@ export class ClaudeRunner {
         ...process.env,
         LANG: 'en_US.UTF-8',
         LC_ALL: 'en_US.UTF-8',
+        // Pass server URL for permission hooks in interactive mode
+        TIDE_SERVER: `http://localhost:${process.env.TIDE_PORT || 5174}`,
       },
       shell: true,
       detached: true,
@@ -288,21 +290,20 @@ export class ClaudeRunner {
       // Remove from tracking immediately
       this.activeProcesses.delete(agentId);
 
-      // Try to kill the process group first (negative pid kills the group)
+      // First, try sending SIGINT (Ctrl+C) which Claude CLI handles gracefully
       if (pid) {
         try {
-          // Kill the entire process group
-          process.kill(-pid, 'SIGTERM');
-          log.log(` Sent SIGTERM to process group ${pid}`);
+          // Send SIGINT to process group (like Ctrl+C)
+          process.kill(-pid, 'SIGINT');
+          log.log(` Sent SIGINT to process group ${pid}`);
         } catch (e) {
-          // Process group kill failed, try direct kill
-          log.log(` Process group kill failed, trying direct kill`);
+          log.log(` Process group SIGINT failed, trying direct`);
         }
       }
 
-      // Also send SIGTERM to the main process
+      // Also send SIGINT to the main process
       try {
-        activeProcess.process.kill('SIGTERM');
+        activeProcess.process.kill('SIGINT');
       } catch (e) {
         // Ignore if already dead
       }
@@ -310,7 +311,20 @@ export class ClaudeRunner {
       // Notify that the process was stopped (so UI updates)
       this.callbacks.onComplete(agentId, false);
 
-      // Give it a moment to terminate gracefully, then force kill
+      // Give it a moment to terminate gracefully with SIGINT, then escalate to SIGTERM
+      setTimeout(() => {
+        try {
+          if (pid && !activeProcess.process.killed) {
+            log.log(` Escalating to SIGTERM for process ${pid}`);
+            process.kill(-pid, 'SIGTERM');
+            activeProcess.process.kill('SIGTERM');
+          }
+        } catch (e) {
+          // Process already dead, ignore
+        }
+      }, 500);
+
+      // Final resort: force kill with SIGKILL
       setTimeout(() => {
         try {
           if (pid && !activeProcess.process.killed) {
@@ -321,7 +335,7 @@ export class ClaudeRunner {
         } catch (e) {
           // Process already dead, ignore
         }
-      }, 1000);
+      }, 1500);
     }
   }
 

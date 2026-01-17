@@ -317,11 +317,11 @@
   }
 }
 
-// Supervisor button in main UI - positioned after commander-toggle-btn
+// Supervisor button in main UI - stacked vertically with other buttons
 .supervisor-toggle-btn {
   position: fixed;
-  bottom: 70px;  // Same as commander button
-  left: 102px;   // After commander button (60px + 36px width + 6px gap)
+  bottom: 154px;  // Stacked above commander button (112 + 36 + 6)
+  left: 16px;     // Aligned with other buttons
   width: 36px;
   height: 36px;
   border-radius: $radius-lg;

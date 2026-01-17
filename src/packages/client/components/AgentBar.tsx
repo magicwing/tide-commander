@@ -23,6 +23,9 @@ const TOOL_ICONS: Record<string, string> = {
 interface AgentBarProps {
   onFocusAgent?: (agentId: string) => void;
   onSpawnClick?: () => void;
+  onSpawnBossClick?: () => void;
+  onNewBuildingClick?: () => void;
+  onNewAreaClick?: () => void;
 }
 
 interface AgentGroup {
@@ -30,7 +33,7 @@ interface AgentGroup {
   agents: Agent[];
 }
 
-export function AgentBar({ onFocusAgent, onSpawnClick }: AgentBarProps) {
+export function AgentBar({ onFocusAgent, onSpawnClick, onSpawnBossClick, onNewBuildingClick, onNewAreaClick }: AgentBarProps) {
   const state = useStore();
   const [hoveredAgent, setHoveredAgent] = useState<Agent | null>(null);
   // Track tool bubbles with animation state
@@ -153,6 +156,36 @@ export function AgentBar({ onFocusAgent, onSpawnClick }: AgentBarProps) {
         >
           <span className="agent-bar-spawn-icon">+</span>
           <span className="agent-bar-spawn-label">New Agent</span>
+        </button>
+
+        {/* New Boss button */}
+        <button
+          className="agent-bar-spawn-btn agent-bar-boss-btn"
+          onClick={onSpawnBossClick}
+          title="Spawn Boss Agent"
+        >
+          <span className="agent-bar-spawn-icon">👑</span>
+          <span className="agent-bar-spawn-label">New Boss</span>
+        </button>
+
+        {/* New Building button */}
+        <button
+          className="agent-bar-spawn-btn agent-bar-building-btn"
+          onClick={onNewBuildingClick}
+          title="Add New Building"
+        >
+          <span className="agent-bar-spawn-icon">🏢</span>
+          <span className="agent-bar-spawn-label">New Building</span>
+        </button>
+
+        {/* New Area button */}
+        <button
+          className="agent-bar-spawn-btn agent-bar-area-btn"
+          onClick={onNewAreaClick}
+          title="Draw New Area"
+        >
+          <span className="agent-bar-spawn-icon">▢</span>
+          <span className="agent-bar-spawn-label">New Area</span>
         </button>
         {agentGroups.map((group) => {
           const groupAgents = group.agents;

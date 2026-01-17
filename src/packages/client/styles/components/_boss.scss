@@ -1,0 +1,541 @@
+// Boss Agent Styles
+
+// ============================================================================
+// Boss Spawn Modal
+// ============================================================================
+
+.boss-spawn-modal {
+  max-width: 480px;
+
+  .modal-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    .boss-header-icon {
+      font-size: 24px;
+    }
+  }
+}
+
+.boss-spawn-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.boss-preview-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+}
+
+.boss-preview-icon {
+  font-size: 64px;
+  margin-bottom: 8px;
+}
+
+.boss-preview-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.boss-form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+// ============================================================================
+// Subordinate Selector (used in BossSpawnModal and SubordinateAssignmentModal)
+// ============================================================================
+
+.subordinates-selector,
+.subordinates-list {
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+}
+
+.subordinates-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.subordinate-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-color);
+  transition: background 0.15s ease;
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &:hover {
+    background: var(--bg-hover);
+  }
+
+  &.selected {
+    background: var(--bg-selected);
+
+    .subordinate-checkbox {
+      background: var(--accent-color);
+      color: #fff;
+    }
+  }
+}
+
+.subordinate-checkbox {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border-color);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+.subordinate-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.subordinate-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.subordinate-name {
+  font-weight: 500;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.subordinate-class {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: capitalize;
+}
+
+.subordinate-status {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  text-transform: capitalize;
+
+  &.status-idle {
+    color: #4aff9e;
+  }
+  &.status-working {
+    color: #4a9eff;
+  }
+  &.status-waiting {
+    color: #ff9e4a;
+  }
+  &.status-error {
+    color: #ff4a4a;
+  }
+}
+
+.subordinate-badge {
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  background: #ffd70030;
+  color: #ffd700;
+  font-weight: 500;
+}
+
+.subordinates-count {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-top: 1px solid var(--border-color);
+}
+
+// ============================================================================
+// Subordinate Assignment Modal
+// ============================================================================
+
+.subordinate-assignment-modal {
+  max-width: 500px;
+}
+
+.subordinate-assignment-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.subordinate-assignment-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+
+  p {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+}
+
+.subordinate-assignment-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.subordinate-assignment-summary {
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border-radius: 6px;
+  font-size: 12px;
+  text-align: center;
+
+  .summary-changed {
+    color: #ffd700;
+    font-weight: 500;
+  }
+
+  .summary-unchanged {
+    color: var(--text-secondary);
+  }
+}
+
+// ============================================================================
+// Boss Button (AgentBar)
+// ============================================================================
+
+.agent-bar-boss-btn {
+  background: linear-gradient(135deg, #ffd700 0%, #b8860b 100%) !important;
+  border: 1px solid #ffd700 !important;
+
+  .agent-bar-spawn-icon {
+    font-size: 14px;
+  }
+
+  &:hover {
+    background: linear-gradient(135deg, #ffd700 0%, #daa520 100%) !important;
+    box-shadow: 0 0 12px rgba(255, 215, 0, 0.4);
+  }
+}
+
+// ============================================================================
+// Boss Section (UnitPanel)
+// ============================================================================
+
+.boss-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
+}
+
+.boss-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.boss-crown-icon {
+  font-size: 20px;
+}
+
+.boss-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: #ffd700;
+}
+
+.boss-subordinates,
+.boss-delegation-history {
+  margin-bottom: 12px;
+}
+
+.boss-subordinates-header,
+.boss-delegation-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  padding: 6px 0;
+
+  &:hover {
+    opacity: 0.8;
+  }
+}
+
+.boss-toggle {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.boss-subordinates-list {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.boss-subordinates-empty,
+.boss-delegation-empty {
+  padding: 12px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.boss-subordinate-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 12px;
+  transition: background 0.15s ease;
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &:hover {
+    background: var(--bg-hover);
+  }
+}
+
+.boss-subordinate-icon {
+  font-size: 14px;
+}
+
+.boss-subordinate-name {
+  flex: 1;
+  font-weight: 500;
+}
+
+.boss-subordinate-status {
+  font-size: 10px;
+  text-transform: capitalize;
+
+  &.status-idle {
+    color: #4aff9e;
+  }
+  &.status-working {
+    color: #4a9eff;
+  }
+  &.status-waiting {
+    color: #ff9e4a;
+  }
+  &.status-error {
+    color: #ff4a4a;
+  }
+}
+
+// ============================================================================
+// Delegation History
+// ============================================================================
+
+.boss-delegation-history-list {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.boss-delegation-pending {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  background: #ffd70015;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 12px;
+  color: #ffd700;
+  animation: pulse 1.5s ease-in-out infinite;
+
+  .delegation-spinner {
+    animation: spin 2s linear infinite;
+  }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.delegation-decision-item {
+  border-bottom: 1px solid var(--border-color);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.delegation-decision-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.15s ease;
+
+  &:hover {
+    background: var(--bg-hover);
+  }
+}
+
+.delegation-decision-arrow {
+  font-size: 10px;
+  color: var(--text-secondary);
+  width: 12px;
+}
+
+.delegation-decision-icon {
+  font-size: 14px;
+}
+
+.delegation-decision-agent {
+  flex: 1;
+  font-weight: 500;
+}
+
+.delegation-decision-confidence {
+  font-size: 10px;
+  letter-spacing: -1px;
+}
+
+.delegation-decision-time {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.delegation-decision-details {
+  padding: 8px 10px;
+  background: var(--bg-secondary);
+  font-size: 11px;
+
+  > div {
+    margin-bottom: 6px;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  strong {
+    color: var(--text-secondary);
+  }
+}
+
+.delegation-command-text {
+  margin-top: 4px;
+  padding: 6px;
+  background: var(--bg-primary);
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.delegation-decision-reasoning,
+.delegation-decision-alternatives {
+  color: var(--text-primary);
+}
+
+// ============================================================================
+// Subordinate Badge (shown on subordinate agents)
+// ============================================================================
+
+.subordinate-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: #ffd70010;
+  border: 1px solid #ffd70040;
+  border-radius: 6px;
+}
+
+.subordinate-badge-icon {
+  font-size: 16px;
+}
+
+.subordinate-badge-text {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-secondary);
+
+  strong {
+    color: #ffd700;
+  }
+}
+
+.subordinate-badge-goto {
+  background: none;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--text-primary);
+  transition: all 0.15s ease;
+
+  &:hover {
+    background: var(--bg-hover);
+    border-color: #ffd700;
+    color: #ffd700;
+  }
+}
+
+// ============================================================================
+// Boss Button Style
+// ============================================================================
+
+.btn-boss {
+  background: linear-gradient(135deg, #ffd700 0%, #b8860b 100%);
+  color: #000;
+  border: none;
+  font-weight: 600;
+
+  &:hover:not(:disabled) {
+    background: linear-gradient(135deg, #ffd700 0%, #daa520 100%);
+    box-shadow: 0 0 12px rgba(255, 215, 0, 0.4);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+}
+
+.btn-small {
+  padding: 4px 10px;
+  font-size: 11px;
+  border-radius: 4px;
+}

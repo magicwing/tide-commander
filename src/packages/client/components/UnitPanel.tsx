@@ -3,7 +3,8 @@ import { useStore, store } from '../store';
 import { AGENT_CLASS_CONFIG } from '../scene/config';
 import { formatNumber, intToHex, formatTokens, formatTimeAgo, formatIdleTime, getIdleTimerColor, filterCostText } from '../utils/formatting';
 import { ModelPreview } from './ModelPreview';
-import type { Agent, DrawingArea, AgentSupervisorHistoryEntry } from '../../shared/types';
+import type { Agent, DrawingArea, AgentSupervisorHistoryEntry, PermissionMode, DelegationDecision } from '../../shared/types';
+import { PERMISSION_MODES, AGENT_CLASSES } from '../../shared/types';
 
 // Progress indicator colors (used by supervisor status components)
 const PROGRESS_COLORS: Record<string, string> = {
@@ -50,8 +51,6 @@ interface AgentsListProps {
 
 function AgentsList({ onOpenAreaExplorer }: AgentsListProps) {
   const state = useStore();
-  const [addingDirToArea, setAddingDirToArea] = useState<string | null>(null);
-  const [newDirPath, setNewDirPath] = useState('');
   const agentsArray = Array.from(state.agents.values());
   const areasArray = Array.from(state.areas.values());
 
@@ -103,19 +102,6 @@ function AgentsList({ onOpenAreaExplorer }: AgentsListProps) {
     return (areaA?.name || '').localeCompare(areaB?.name || '');
   });
 
-  const handleAddDirectory = (areaId: string) => {
-    if (newDirPath.trim()) {
-      store.addDirectoryToArea(areaId, newDirPath.trim());
-      setNewDirPath('');
-      setAddingDirToArea(null);
-    }
-  };
-
-  const handleRemoveDirectory = (areaId: string, dirPath: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    store.removeDirectoryFromArea(areaId, dirPath);
-  };
-
   // Show empty state only if no agents AND no areas
   if (agentsArray.length === 0 && areasArray.length === 0) {
     return (
@@ -163,62 +149,6 @@ function AgentsList({ onOpenAreaExplorer }: AgentsListProps) {
               <span className="agents-group-count">{agents.length}</span>
             </div>
 
-            {/* Directory list for areas */}
-            {area && (
-              <div className="area-directories-compact" style={{ background: `${area.color}08` }}>
-                {area.directories.map((dir) => (
-                  <div
-                    key={dir}
-                    className="area-dir-item"
-                    onClick={() => onOpenAreaExplorer?.(area.id)}
-                    title={dir}
-                  >
-                    <span className="area-dir-icon">📁</span>
-                    <span className="area-dir-path">{dir.split('/').pop() || dir}</span>
-                    <button
-                      className="area-dir-remove"
-                      onClick={(e) => handleRemoveDirectory(area.id, dir, e)}
-                      title="Remove"
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
-                {addingDirToArea === area.id ? (
-                  <div className="area-add-dir-inline">
-                    <input
-                      type="text"
-                      className="area-add-dir-input"
-                      placeholder="/path/to/dir"
-                      value={newDirPath}
-                      onChange={(e) => setNewDirPath(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleAddDirectory(area.id);
-                        if (e.key === 'Escape') {
-                          setAddingDirToArea(null);
-                          setNewDirPath('');
-                        }
-                      }}
-                      autoFocus
-                    />
-                    <button
-                      className="area-add-dir-confirm"
-                      onClick={() => handleAddDirectory(area.id)}
-                    >
-                      +
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    className="area-add-dir-btn-compact"
-                    onClick={() => setAddingDirToArea(area.id)}
-                  >
-                    + Add Directory
-                  </button>
-                )}
-              </div>
-            )}
-
             {agents.length > 0 && (
               <div
                 className="agents-group-items"
@@ -252,12 +182,12 @@ function AgentListItem({ agent, area }: AgentListItemProps) {
   const isSelected = state.selectedAgentIds.has(agent.id);
   const [, setTick] = useState(0);
 
-  // Update idle timer every second when agent is idle
+  // Update idle timer every 15 seconds when agent is idle
   useEffect(() => {
     if (agent.status === 'idle') {
       const interval = setInterval(() => {
         setTick(t => t + 1);
-      }, 1000);
+      }, 15000);
       return () => clearInterval(interval);
     }
   }, [agent.status]);
@@ -413,29 +343,42 @@ const STATUS_COLORS: Record<string, string> = {
   idle: '#4aff9e',
   working: '#4a9eff',
   waiting: '#ff9e4a',
+  waiting_permission: '#ffcc00', // Yellow/gold for awaiting permission
   error: '#ff4a4a',
   offline: '#888888',
 };
 
-function SingleAgentPanel({ agent, onFocusAgent, onKillAgent, onOpenAreaExplorer }: SingleAgentPanelProps) {
+// Remembered pattern type (matches server)
+interface RememberedPattern {
+  tool: string;
+  pattern: string;
+  description: string;
+  createdAt: number;
+}
+
+function SingleAgentPanel({ agent: agentProp, onFocusAgent, onKillAgent, onOpenAreaExplorer }: SingleAgentPanelProps) {
   const state = useStore();
+  // Get the latest agent data from the store to ensure we have current values
+  const agent = state.agents.get(agentProp.id) || agentProp;
   const classConfig = AGENT_CLASS_CONFIG[agent.class];
   const [isEditingName, setIsEditingName] = useState(false);
   const [editName, setEditName] = useState(agent.name);
   const [, setTick] = useState(0); // For forcing re-render of idle timer
   const [showHistory, setShowHistory] = useState(true);
+  const [showPatterns, setShowPatterns] = useState(false);
+  const [rememberedPatterns, setRememberedPatterns] = useState<RememberedPattern[]>([]);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   // Get supervisor history for this agent
   const supervisorHistory = store.getAgentSupervisorHistory(agent.id);
   const isLoadingHistory = store.isLoadingHistoryForAgent(agent.id);
 
-  // Fetch supervisor history when agent is selected (only if not already loaded/loading)
+  // Fetch supervisor history when agent is selected (only if not already fetched/loading)
   useEffect(() => {
-    if (supervisorHistory.length === 0 && !isLoadingHistory) {
+    if (!store.hasHistoryBeenFetched(agent.id) && !isLoadingHistory) {
       store.requestAgentSupervisorHistory(agent.id);
     }
-  }, [agent.id, supervisorHistory.length, isLoadingHistory]);
+  }, [agent.id, isLoadingHistory]);
 
   // Update editName when agent changes
   useEffect(() => {
@@ -450,21 +393,61 @@ function SingleAgentPanel({ agent, onFocusAgent, onKillAgent, onOpenAreaExplorer
     }
   }, [isEditingName]);
 
-  // Update idle timer every second when agent is idle
+  // Update idle timer every 15 seconds when agent is idle
   useEffect(() => {
     if (agent.status === 'idle') {
       const interval = setInterval(() => {
         setTick(t => t + 1);
-      }, 1000);
+      }, 15000);
       return () => clearInterval(interval);
     }
   }, [agent.status]);
 
-  // Calculate context usage from actual contextUsed/contextLimit
-  const contextPercent = useMemo(() => {
+  // Fetch remembered patterns for interactive mode agents
+  useEffect(() => {
+    if (agent.permissionMode === 'interactive') {
+      fetch('http://localhost:5174/api/remembered-patterns')
+        .then(res => res.json())
+        .then(setRememberedPatterns)
+        .catch(err => console.error('Failed to fetch remembered patterns:', err));
+    }
+  }, [agent.permissionMode]);
+
+  // Handler to remove a remembered pattern
+  const handleRemovePattern = async (tool: string, pattern: string) => {
+    try {
+      const res = await fetch(`http://localhost:5174/api/remembered-patterns/${tool}/${encodeURIComponent(pattern)}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        setRememberedPatterns(prev => prev.filter(p => !(p.tool === tool && p.pattern === pattern)));
+      }
+    } catch (err) {
+      console.error('Failed to remove pattern:', err);
+    }
+  };
+
+  // Handler to clear all patterns
+  const handleClearAllPatterns = async () => {
+    if (!confirm('Clear all remembered permission patterns?')) return;
+    try {
+      const res = await fetch('http://localhost:5174/api/remembered-patterns', {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        setRememberedPatterns([]);
+      }
+    } catch (err) {
+      console.error('Failed to clear patterns:', err);
+    }
+  };
+
+  // Calculate remaining context (like the mana bar)
+  const contextRemainingPercent = useMemo(() => {
     const used = agent.contextUsed || 0;
     const limit = agent.contextLimit || 200000;
-    return Math.min(100, (used / limit) * 100);
+    const remaining = Math.max(0, limit - used);
+    return (remaining / limit) * 100;
   }, [agent.contextUsed, agent.contextLimit]);
 
   // Get assigned area for this agent
@@ -580,26 +563,6 @@ function SingleAgentPanel({ agent, onFocusAgent, onKillAgent, onOpenAreaExplorer
         </div>
       )}
 
-      {/* Area Directories */}
-      {assignedArea && assignedArea.directories.length > 0 && (
-        <div className="unit-directories">
-          <div className="unit-stat-label">Folders</div>
-          <div className="unit-directories-list">
-            {assignedArea.directories.map((dir) => (
-              <div
-                key={dir}
-                className="unit-directory-item clickable"
-                title={`Click to browse: ${dir}`}
-                onClick={() => onOpenAreaExplorer?.(assignedArea.id)}
-              >
-                <span className="unit-directory-icon">📁</span>
-                <span className="unit-directory-path">{dir.split('/').pop() || dir}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Last Prompt */}
       {lastPrompt && (
         <div className="unit-last-prompt">
@@ -636,24 +599,24 @@ function SingleAgentPanel({ agent, onFocusAgent, onKillAgent, onOpenAreaExplorer
         </div>
       </div>
 
-      {/* Context Bar */}
+      {/* Context Bar - shows remaining context like the mana bar */}
       <div className="unit-context">
-        <div className="unit-stat-label">Context Usage</div>
+        <div className="unit-stat-label">Remaining Context</div>
         <div className="unit-context-bar">
           <div
             className="unit-context-fill"
             style={{
-              width: `${contextPercent}%`,
+              width: `${contextRemainingPercent}%`,
               background:
-                contextPercent > 80
+                contextRemainingPercent < 20
                   ? '#ff4a4a'
-                  : contextPercent > 50
+                  : contextRemainingPercent < 50
                     ? '#ff9e4a'
                     : '#4aff9e',
             }}
           />
         </div>
-        <span className="unit-context-value">{Math.round(contextPercent)}%</span>
+        <span className="unit-context-value">{Math.round(contextRemainingPercent)}%</span>
       </div>
 
       {/* Current Tool */}
@@ -677,6 +640,84 @@ function SingleAgentPanel({ agent, onFocusAgent, onKillAgent, onOpenAreaExplorer
         <div className="unit-stat-label">CWD</div>
         <div className="unit-cwd-path" title={agent.cwd}>{agent.cwd}</div>
       </div>
+
+      {/* Permission Mode */}
+      <div className="unit-permission-mode">
+        <div className="unit-stat-label">Permissions</div>
+        <div className="unit-permission-mode-value" title={PERMISSION_MODES[agent.permissionMode]?.description}>
+          <span className="unit-permission-mode-icon">
+            {agent.permissionMode === 'bypass' ? '⚡' : '🔐'}
+          </span>
+          <span className="unit-permission-mode-label">
+            {PERMISSION_MODES[agent.permissionMode]?.label || agent.permissionMode}
+          </span>
+        </div>
+      </div>
+
+      {/* Remembered Patterns (only for interactive mode) */}
+      {agent.permissionMode === 'interactive' && (
+        <div className="unit-remembered-patterns">
+          <div
+            className="unit-remembered-patterns-header"
+            onClick={() => setShowPatterns(!showPatterns)}
+          >
+            <div className="unit-stat-label">Allowed Patterns</div>
+            <span className="unit-remembered-patterns-toggle">
+              {rememberedPatterns.length > 0 && (
+                <span className="unit-remembered-patterns-count">{rememberedPatterns.length}</span>
+              )}
+              {showPatterns ? '▼' : '▶'}
+            </span>
+          </div>
+          {showPatterns && (
+            <div className="unit-remembered-patterns-list">
+              {rememberedPatterns.length === 0 ? (
+                <div className="unit-remembered-patterns-empty">
+                  No patterns remembered yet. Click ✓+ when approving to remember.
+                </div>
+              ) : (
+                <>
+                  {rememberedPatterns.map((p, i) => (
+                    <div key={i} className="unit-remembered-pattern-item">
+                      <span className="unit-pattern-tool">{p.tool}</span>
+                      <span className="unit-pattern-desc" title={p.pattern}>{p.description}</span>
+                      <button
+                        className="unit-pattern-remove"
+                        onClick={() => handleRemovePattern(p.tool, p.pattern)}
+                        title="Remove this pattern"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    className="unit-patterns-clear-all"
+                    onClick={handleClearAllPatterns}
+                  >
+                    Clear All
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Resume Session Command */}
+      {agent.sessionId && (
+        <div className="unit-resume-cmd">
+          <div className="unit-stat-label">Resume Session</div>
+          <div
+            className="unit-resume-cmd-text"
+            title="Click to copy"
+            onClick={() => {
+              navigator.clipboard.writeText(`claude --resume ${agent.sessionId}`);
+            }}
+          >
+            claude --resume {agent.sessionId}
+          </div>
+        </div>
+      )}
 
       {/* Supervisor History */}
       <div className="unit-supervisor-history">
@@ -706,6 +747,16 @@ function SingleAgentPanel({ agent, onFocusAgent, onKillAgent, onOpenAreaExplorer
           </div>
         )}
       </div>
+
+      {/* Boss-Specific Section */}
+      {agent.class === 'boss' && (
+        <BossAgentSection agent={agent} />
+      )}
+
+      {/* Subordinate Badge (if agent has a boss) */}
+      {agent.bossId && (
+        <SubordinateBadge agentId={agent.id} bossId={agent.bossId} />
+      )}
 
     </div>
   );
@@ -833,6 +884,234 @@ function SupervisorHistoryItem({ entry, defaultExpanded = false }: SupervisorHis
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Boss Agent Components
+// ============================================================================
+
+interface BossAgentSectionProps {
+  agent: Agent;
+}
+
+function BossAgentSection({ agent }: BossAgentSectionProps) {
+  const state = useStore();
+  const [showSubordinates, setShowSubordinates] = useState(true);
+  const [showDelegationHistory, setShowDelegationHistory] = useState(true);
+
+  const subordinates = store.getSubordinates(agent.id);
+  const delegationHistory = store.getDelegationHistory(agent.id);
+  const pendingDelegation = state.pendingDelegation;
+  const isPendingForThisBoss = pendingDelegation?.bossId === agent.id;
+
+  // Request delegation history when boss is selected
+  useEffect(() => {
+    store.requestDelegationHistory(agent.id);
+  }, [agent.id]);
+
+  const bossConfig = AGENT_CLASSES.boss;
+
+  return (
+    <div className="boss-section">
+      {/* Boss Header */}
+      <div className="boss-header">
+        <span className="boss-crown-icon" style={{ color: bossConfig.color }}>
+          {bossConfig.icon}
+        </span>
+        <span className="boss-title">Boss Agent</span>
+      </div>
+
+      {/* Subordinates List */}
+      <div className="boss-subordinates">
+        <div
+          className="boss-subordinates-header"
+          onClick={() => setShowSubordinates(!showSubordinates)}
+        >
+          <div className="unit-stat-label">
+            Team ({subordinates.length})
+          </div>
+          <span className="boss-toggle">{showSubordinates ? '▼' : '▶'}</span>
+        </div>
+        {showSubordinates && (
+          <div className="boss-subordinates-list">
+            {subordinates.length === 0 ? (
+              <div className="boss-subordinates-empty">
+                No subordinates assigned. Use "Manage Team" to add agents.
+              </div>
+            ) : (
+              subordinates.map((sub) => {
+                const classConfig = AGENT_CLASSES[sub.class];
+                return (
+                  <div
+                    key={sub.id}
+                    className="boss-subordinate-item"
+                    onClick={() => store.selectAgent(sub.id)}
+                  >
+                    <span
+                      className="boss-subordinate-icon"
+                      style={{ color: classConfig.color }}
+                    >
+                      {classConfig.icon}
+                    </span>
+                    <span className="boss-subordinate-name">{sub.name}</span>
+                    <span className={`boss-subordinate-status status-${sub.status}`}>
+                      {sub.status}
+                    </span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Delegation History */}
+      <div className="boss-delegation-history">
+        <div
+          className="boss-delegation-history-header"
+          onClick={() => setShowDelegationHistory(!showDelegationHistory)}
+        >
+          <div className="unit-stat-label">
+            Delegation History ({delegationHistory.length})
+          </div>
+          <span className="boss-toggle">{showDelegationHistory ? '▼' : '▶'}</span>
+        </div>
+        {showDelegationHistory && (
+          <div className="boss-delegation-history-list">
+            {isPendingForThisBoss && (
+              <div className="boss-delegation-pending">
+                <span className="delegation-spinner">⏳</span>
+                Analyzing request...
+              </div>
+            )}
+            {delegationHistory.length === 0 && !isPendingForThisBoss ? (
+              <div className="boss-delegation-empty">
+                No delegation history yet. Send commands to this boss to delegate tasks.
+              </div>
+            ) : (
+              delegationHistory.slice(0, 10).map((decision) => (
+                <DelegationDecisionItem key={decision.id} decision={decision} />
+              ))
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface DelegationDecisionItemProps {
+  decision: DelegationDecision;
+}
+
+function DelegationDecisionItem({ decision }: DelegationDecisionItemProps) {
+  const [expanded, setExpanded] = useState(false);
+  const state = useStore();
+
+  // Format timestamp
+  const formatTime = (timestamp: number): string => {
+    const seconds = Math.floor((Date.now() - timestamp) / 1000);
+    if (seconds < 60) return 'just now';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
+  };
+
+  const targetAgent = state.agents.get(decision.selectedAgentId);
+  const targetClassConfig = targetAgent ? AGENT_CLASSES[targetAgent.class] : null;
+
+  const confidenceColors = {
+    high: '#4aff9e',
+    medium: '#ff9e4a',
+    low: '#ff4a4a',
+  };
+
+  return (
+    <div className="delegation-decision-item">
+      <div
+        className="delegation-decision-header"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <span className="delegation-decision-arrow">
+          {expanded ? '▼' : '▶'}
+        </span>
+        {targetClassConfig && (
+          <span
+            className="delegation-decision-icon"
+            style={{ color: targetClassConfig.color }}
+          >
+            {targetClassConfig.icon}
+          </span>
+        )}
+        <span className="delegation-decision-agent">
+          → {decision.selectedAgentName}
+        </span>
+        <span
+          className="delegation-decision-confidence"
+          style={{ color: confidenceColors[decision.confidence] }}
+          title={`Confidence: ${decision.confidence}`}
+        >
+          {decision.confidence === 'high' ? '●●●' :
+           decision.confidence === 'medium' ? '●●○' : '●○○'}
+        </span>
+        <span className="delegation-decision-time">{formatTime(decision.timestamp)}</span>
+      </div>
+      {expanded && (
+        <div className="delegation-decision-details">
+          <div className="delegation-decision-command">
+            <strong>Command:</strong>
+            <div className="delegation-command-text">
+              {decision.userCommand.length > 200
+                ? decision.userCommand.slice(0, 200) + '...'
+                : decision.userCommand}
+            </div>
+          </div>
+          <div className="delegation-decision-reasoning">
+            <strong>Reasoning:</strong> {decision.reasoning}
+          </div>
+          {decision.alternativeAgents.length > 0 && (
+            <div className="delegation-decision-alternatives">
+              <strong>Alternatives:</strong> {decision.alternativeAgents.join(', ')}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface SubordinateBadgeProps {
+  agentId: string;
+  bossId: string;
+}
+
+function SubordinateBadge({ agentId, bossId }: SubordinateBadgeProps) {
+  const state = useStore();
+  const boss = state.agents.get(bossId);
+
+  if (!boss) return null;
+
+  const bossConfig = AGENT_CLASSES.boss;
+
+  return (
+    <div className="subordinate-badge">
+      <span className="subordinate-badge-icon" style={{ color: bossConfig.color }}>
+        {bossConfig.icon}
+      </span>
+      <span className="subordinate-badge-text">
+        Reports to: <strong>{boss.name}</strong>
+      </span>
+      <button
+        className="subordinate-badge-goto"
+        onClick={() => store.selectAgent(bossId)}
+        title="Go to boss"
+      >
+        →
+      </button>
     </div>
   );
 }

@@ -3,8 +3,8 @@
 
 .commander-toggle-btn {
   position: fixed;
-  bottom: 70px;  // Above the agent bar (60px height + 10px margin)
-  left: 60px;    // Next to the settings button
+  bottom: 112px;  // Stacked above settings button (70 + 36 + 6)
+  left: 16px;     // Aligned with other buttons
   width: 36px;
   height: 36px;
   border-radius: $radius-lg;

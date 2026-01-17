@@ -119,6 +119,7 @@ export interface RunnerRequest {
   sessionId?: string;
   model?: string;
   useChrome?: boolean;
+  permissionMode?: 'bypass' | 'interactive';
 }
 
 // Runner callbacks

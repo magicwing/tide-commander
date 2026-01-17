@@ -9,6 +9,7 @@ const STATUS_ANIMATIONS: Record<AgentStatus, string> = {
   idle: 'idle',
   working: 'walk',      // Active, doing work
   waiting: 'sit',       // Waiting for input/response
+  waiting_permission: 'idle', // Waiting for permission approval
   error: 'emote-no',    // Something went wrong
   offline: 'static',    // Not connected
 };
@@ -18,6 +19,7 @@ const STATUS_COLORS: Record<AgentStatus, number> = {
   idle: 0x4aff9e,     // Green - ready
   working: 0x4a9eff,  // Blue - active
   waiting: 0xff9e4a,  // Orange - waiting
+  waiting_permission: 0xffcc00, // Yellow/gold - awaiting permission
   error: 0xff4a4a,    // Red - error
   offline: 0x888888,  // Gray - offline
 };

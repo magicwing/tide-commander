@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useStore, store } from '../store';
-import type { DrawingArea, DrawingTool } from '../../shared/types';
+import type { DrawingArea, DrawingTool, Building } from '../../shared/types';
+import { BUILDING_TYPES } from '../../shared/types';
 
 // Color palette for areas
 const AREA_COLORS = [
@@ -31,12 +32,22 @@ export interface TerrainConfig {
   floorStyle: FloorStyle;
 }
 
+// Animation type for status
+export type AnimationType = 'static' | 'idle' | 'walk' | 'sprint' | 'jump' | 'fall' | 'crouch' | 'sit' | 'die' | 'emote-yes' | 'emote-no';
+
+// Animation config for different agent statuses
+export interface AnimationConfig {
+  idleAnimation: AnimationType;
+  workingAnimation: AnimationType;
+}
+
 export interface SceneConfig {
   characterScale: number;
   indicatorScale: number;
   gridVisible: boolean;
   timeMode: TimeMode;
   terrain: TerrainConfig;
+  animations: AnimationConfig;
 }
 
 interface ToolboxProps {
@@ -45,11 +56,13 @@ interface ToolboxProps {
   config: SceneConfig;
   isOpen: boolean;
   onClose: () => void;
+  onOpenBuildingModal?: (buildingId?: string) => void;
 }
 
-export function Toolbox({ onConfigChange, onToolChange, config, isOpen, onClose }: ToolboxProps) {
+export function Toolbox({ onConfigChange, onToolChange, config, isOpen, onClose, onOpenBuildingModal }: ToolboxProps) {
   const state = useStore();
   const areasArray = Array.from(state.areas.values());
+  const buildingsArray = Array.from(state.buildings.values());
 
   // Areas are loaded from server via WebSocket on connection
 
@@ -170,6 +183,41 @@ export function Toolbox({ onConfigChange, onToolChange, config, isOpen, onClose 
           />
         )}
 
+        {/* Buildings Section */}
+        <div className="toolbox-section buildings-section">
+          <div className="toolbox-section-header">
+            Buildings ({buildingsArray.length})
+            <button
+              className="add-building-btn"
+              onClick={() => onOpenBuildingModal?.()}
+              title="Add Building"
+            >
+              +
+            </button>
+          </div>
+          <div className="buildings-list">
+            {buildingsArray.length === 0 ? (
+              <div className="buildings-empty">
+                Click + to add a building
+              </div>
+            ) : (
+              buildingsArray.map((building) => (
+                <BuildingItem
+                  key={building.id}
+                  building={building}
+                  isSelected={state.selectedBuildingId === building.id}
+                  onClick={() => {
+                    store.selectBuilding(
+                      state.selectedBuildingId === building.id ? null : building.id
+                    );
+                  }}
+                  onEdit={() => onOpenBuildingModal?.(building.id)}
+                />
+              ))
+            )}
+          </div>
+        </div>
+
         {/* Config Section */}
         <ConfigSection config={config} onChange={onConfigChange} />
       </aside>
@@ -204,6 +252,51 @@ function AreaItem({ area, isSelected, onClick, onDelete }: AreaItemProps) {
   );
 }
 
+const STATUS_COLORS: Record<Building['status'], string> = {
+  running: '#4aff9e',
+  stopped: '#888888',
+  error: '#ff4a4a',
+  unknown: '#ffaa00',
+  starting: '#4a9eff',
+  stopping: '#ffaa00',
+};
+
+interface BuildingItemProps {
+  building: Building;
+  isSelected: boolean;
+  onClick: () => void;
+  onEdit: () => void;
+}
+
+function BuildingItem({ building, isSelected, onClick, onEdit }: BuildingItemProps) {
+  const typeInfo = BUILDING_TYPES[building.type];
+
+  return (
+    <div className={`building-item ${isSelected ? 'selected' : ''}`} onClick={onClick}>
+      <div
+        className="building-status-dot"
+        style={{ backgroundColor: STATUS_COLORS[building.status] }}
+        title={building.status}
+      />
+      <div className="building-icon">{typeInfo.icon}</div>
+      <div className="building-info">
+        <div className="building-name">{building.name}</div>
+        <div className="building-meta">{building.type}</div>
+      </div>
+      <button
+        className="building-edit-btn"
+        onClick={(e) => {
+          e.stopPropagation();
+          onEdit();
+        }}
+        title="Edit building"
+      >
+        ⚙
+      </button>
+    </div>
+  );
+}
+
 interface AreaEditorProps {
   area: DrawingArea;
   onClose: () => void;
@@ -211,6 +304,8 @@ interface AreaEditorProps {
 
 function AreaEditor({ area, onClose }: AreaEditorProps) {
   const [name, setName] = useState(area.name);
+  const [isAddingFolder, setIsAddingFolder] = useState(false);
+  const [newFolderPath, setNewFolderPath] = useState('');
 
   useEffect(() => {
     setName(area.name);
@@ -224,6 +319,19 @@ function AreaEditor({ area, onClose }: AreaEditorProps) {
 
   const handleColorSelect = (color: string) => {
     store.updateArea(area.id, { color });
+  };
+
+  const handleAddFolder = () => {
+    if (newFolderPath.trim()) {
+      store.addDirectoryToArea(area.id, newFolderPath.trim());
+      setNewFolderPath('');
+      setIsAddingFolder(false);
+    }
+  };
+
+  const handleRemoveFolder = (dirPath: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    store.removeDirectoryFromArea(area.id, dirPath);
   };
 
   return (
@@ -255,6 +363,58 @@ function AreaEditor({ area, onClose }: AreaEditorProps) {
           ))}
         </div>
       </div>
+
+      {/* Folders Configuration */}
+      <div className="area-editor-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+        <div className="area-editor-label" style={{ marginBottom: 6 }}>
+          Folders ({area.directories.length})
+        </div>
+        <div className="area-folders-list">
+          {area.directories.map((dir) => (
+            <div key={dir} className="area-folder-item" title={dir}>
+              <span className="area-folder-icon">📁</span>
+              <span className="area-folder-path">{dir.split('/').pop() || dir}</span>
+              <button
+                className="area-folder-remove"
+                onClick={(e) => handleRemoveFolder(dir, e)}
+                title="Remove folder"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          {isAddingFolder ? (
+            <div className="area-add-folder-inline">
+              <input
+                type="text"
+                className="area-add-folder-input"
+                placeholder="/path/to/folder"
+                value={newFolderPath}
+                onChange={(e) => setNewFolderPath(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleAddFolder();
+                  if (e.key === 'Escape') {
+                    setIsAddingFolder(false);
+                    setNewFolderPath('');
+                  }
+                }}
+                autoFocus
+              />
+              <button className="area-add-folder-confirm" onClick={handleAddFolder}>
+                +
+              </button>
+            </div>
+          ) : (
+            <button
+              className="area-add-folder-btn"
+              onClick={() => setIsAddingFolder(true)}
+            >
+              + Add Folder
+            </button>
+          )}
+        </div>
+      </div>
+
       {area.assignedAgentIds.length > 0 && (
         <div className="area-editor-row">
           <div className="area-editor-label">Assigned Agents ({area.assignedAgentIds.length})</div>
@@ -287,6 +447,20 @@ const FLOOR_STYLE_OPTIONS: { value: FloorStyle; label: string; icon: string }[] 
   { value: 'metal', label: 'Metal', icon: '⚙️' },
   { value: 'hex', label: 'Hexagon', icon: '⬡' },
   { value: 'circuit', label: 'Circuit', icon: '🔌' },
+];
+
+const ANIMATION_OPTIONS: { value: AnimationType; label: string; icon: string }[] = [
+  { value: 'static', label: 'Static', icon: '🧍' },
+  { value: 'idle', label: 'Idle', icon: '🚶' },
+  { value: 'walk', label: 'Walk', icon: '🚶‍♂️' },
+  { value: 'sprint', label: 'Sprint', icon: '🏃' },
+  { value: 'jump', label: 'Jump', icon: '⬆️' },
+  { value: 'fall', label: 'Fall', icon: '⬇️' },
+  { value: 'crouch', label: 'Crouch', icon: '🧎' },
+  { value: 'sit', label: 'Sit', icon: '🪑' },
+  { value: 'die', label: 'Die', icon: '💀' },
+  { value: 'emote-yes', label: 'Yes', icon: '👍' },
+  { value: 'emote-no', label: 'No', icon: '👎' },
 ];
 
 function TimeModePicker({ value, onChange }: { value: TimeMode; onChange: (mode: TimeMode) => void }) {
@@ -373,12 +547,58 @@ function FloorStylePicker({ value, onChange }: { value: FloorStyle; onChange: (s
   );
 }
 
+function AnimationPicker({ value, onChange }: { value: AnimationType; onChange: (anim: AnimationType) => void }) {
+  const currentIndex = ANIMATION_OPTIONS.findIndex(opt => opt.value === value);
+
+  const handlePrev = () => {
+    const newIndex = currentIndex > 0 ? currentIndex - 1 : ANIMATION_OPTIONS.length - 1;
+    onChange(ANIMATION_OPTIONS[newIndex].value);
+  };
+
+  const handleNext = () => {
+    const newIndex = currentIndex < ANIMATION_OPTIONS.length - 1 ? currentIndex + 1 : 0;
+    onChange(ANIMATION_OPTIONS[newIndex].value);
+  };
+
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    if (e.deltaY > 0) {
+      handleNext();
+    } else {
+      handlePrev();
+    }
+  };
+
+  const current = ANIMATION_OPTIONS[currentIndex];
+  const prev = ANIMATION_OPTIONS[currentIndex > 0 ? currentIndex - 1 : ANIMATION_OPTIONS.length - 1];
+  const next = ANIMATION_OPTIONS[currentIndex < ANIMATION_OPTIONS.length - 1 ? currentIndex + 1 : 0];
+
+  return (
+    <div className="time-picker" onWheel={handleWheel}>
+      <button className="time-picker-arrow up" onClick={handlePrev}>▲</button>
+      <div className="time-picker-items">
+        <div className="time-picker-item faded">{prev.icon}</div>
+        <div className="time-picker-item current">
+          <span className="time-picker-icon">{current.icon}</span>
+          <span className="time-picker-label">{current.label}</span>
+        </div>
+        <div className="time-picker-item faded">{next.icon}</div>
+      </div>
+      <button className="time-picker-arrow down" onClick={handleNext}>▼</button>
+    </div>
+  );
+}
+
 function ConfigSection({ config, onChange }: ConfigSectionProps) {
   const state = useStore();
   const [historyLimit, setHistoryLimit] = useState(state.settings.historyLimit);
 
   const updateTerrain = (updates: Partial<TerrainConfig>) => {
     onChange({ ...config, terrain: { ...config.terrain, ...updates } });
+  };
+
+  const updateAnimations = (updates: Partial<AnimationConfig>) => {
+    onChange({ ...config, animations: { ...config.animations, ...updates } });
   };
 
   const handleHistoryLimitChange = (value: number) => {
@@ -520,8 +740,24 @@ function ConfigSection({ config, onChange }: ConfigSectionProps) {
           onChange={(style) => updateTerrain({ floorStyle: style })}
         />
       </div>
+
+      <div className="toolbox-section-header" style={{ marginTop: 10 }}>Animations</div>
+      <div className="config-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
+        <span className="config-label">Idle Status</span>
+        <AnimationPicker
+          value={config.animations.idleAnimation}
+          onChange={(anim) => updateAnimations({ idleAnimation: anim })}
+        />
+      </div>
+      <div className="config-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4, marginTop: 8 }}>
+        <span className="config-label">Working Status</span>
+        <AnimationPicker
+          value={config.animations.workingAnimation}
+          onChange={(anim) => updateAnimations({ workingAnimation: anim })}
+        />
+      </div>
     </div>
   );
 }
 
-export { AREA_COLORS, TIME_MODE_OPTIONS, FLOOR_STYLE_OPTIONS };
+export { AREA_COLORS, TIME_MODE_OPTIONS, FLOOR_STYLE_OPTIONS, ANIMATION_OPTIONS };

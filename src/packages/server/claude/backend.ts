@@ -36,9 +36,36 @@ export class ClaudeBackend implements CLIBackend {
       args.push('--resume', config.sessionId);
     }
 
-    // Permission mode - bypass for autonomous agents
+    // Permission mode - bypass for autonomous agents, interactive uses hooks
     if (config.permissionMode === 'bypass') {
       args.push('--dangerously-skip-permissions');
+    } else if (config.permissionMode === 'interactive') {
+      // For interactive mode, configure the PreToolUse hook to ask for permission
+      // The hook script calls the Tide Commander server which shows UI for approval
+      const hookPath = path.join(process.cwd(), 'hooks', 'permission-hook.sh');
+      const hookSettings = {
+        hooks: {
+          PreToolUse: [
+            {
+              hooks: [
+                {
+                  type: 'command',
+                  command: hookPath,
+                  timeout: 300, // 5 minute timeout for user response
+                },
+              ],
+            },
+          ],
+        },
+      };
+      // Write settings to a temp file to avoid shell escaping issues
+      const tideDataDir = path.join(os.homedir(), '.tide-commander');
+      if (!fs.existsSync(tideDataDir)) {
+        fs.mkdirSync(tideDataDir, { recursive: true });
+      }
+      const settingsPath = path.join(tideDataDir, 'hook-settings.json');
+      fs.writeFileSync(settingsPath, JSON.stringify(hookSettings, null, 2));
+      args.push('--settings', settingsPath);
     }
 
     // Model selection

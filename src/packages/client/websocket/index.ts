@@ -1,4 +1,4 @@
-import type { Agent, ServerMessage, ClientMessage } from '../../shared/types';
+import type { Agent, ServerMessage, ClientMessage, PermissionRequest, DelegationDecision } from '../../shared/types';
 import { store } from '../store';
 
 let ws: WebSocket | null = null;
@@ -106,6 +106,7 @@ function handleServerMessage(message: ServerMessage): void {
     case 'agent_created': {
       const newAgent = message.payload as Agent;
       store.addAgent(newAgent);
+      store.selectAgent(newAgent.id);
       onAgentCreated?.(newAgent);
       onSpawnSuccess?.();
       onToast?.('success', 'Agent Deployed', `${newAgent.name} is ready for commands`);
@@ -272,6 +273,87 @@ function handleServerMessage(message: ServerMessage): void {
     case 'areas_update': {
       const areasArray = message.payload as import('../../shared/types').DrawingArea[];
       store.setAreasFromServer(areasArray);
+      break;
+    }
+
+    case 'buildings_update': {
+      const buildingsArray = message.payload as import('../../shared/types').Building[];
+      store.setBuildingsFromServer(buildingsArray);
+      break;
+    }
+
+    case 'building_created': {
+      const building = message.payload as import('../../shared/types').Building;
+      store.addBuilding(building);
+      break;
+    }
+
+    case 'building_updated': {
+      const building = message.payload as import('../../shared/types').Building;
+      store.updateBuildingFromServer(building);
+      break;
+    }
+
+    case 'building_deleted': {
+      const { id } = message.payload as { id: string };
+      store.removeBuildingFromServer(id);
+      break;
+    }
+
+    case 'building_logs': {
+      const { buildingId, logs } = message.payload as {
+        buildingId: string;
+        logs: string;
+        timestamp: number;
+      };
+      store.addBuildingLogs(buildingId, logs);
+      break;
+    }
+
+    case 'permission_request': {
+      const request = message.payload as PermissionRequest;
+      store.addPermissionRequest(request);
+      break;
+    }
+
+    case 'permission_resolved': {
+      const { requestId, approved } = message.payload as {
+        requestId: string;
+        approved: boolean;
+      };
+      store.resolvePermissionRequest(requestId, approved);
+      break;
+    }
+
+    // ========================================================================
+    // Boss Agent Messages
+    // ========================================================================
+
+    case 'delegation_decision': {
+      const decision = message.payload as DelegationDecision;
+      store.handleDelegationDecision(decision);
+      // Show toast for the delegation
+      if (decision.status === 'sent') {
+        onToast?.('info', 'Task Delegated', `Delegated to ${decision.selectedAgentName}: ${decision.reasoning.slice(0, 80)}...`);
+      }
+      break;
+    }
+
+    case 'boss_subordinates_updated': {
+      const { bossId, subordinateIds } = message.payload as {
+        bossId: string;
+        subordinateIds: string[];
+      };
+      store.updateBossSubordinates(bossId, subordinateIds);
+      break;
+    }
+
+    case 'delegation_history': {
+      const { bossId, decisions } = message.payload as {
+        bossId: string;
+        decisions: DelegationDecision[];
+      };
+      store.setDelegationHistory(bossId, decisions);
       break;
     }
   }

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useStore, store, ClaudeOutput } from '../store';
-import type { Agent, AgentAnalysis } from '../../shared/types';
+import type { Agent, AgentAnalysis, PermissionRequest } from '../../shared/types';
 import { AGENT_CLASS_CONFIG } from '../scene/config';
 import { formatIdleTime, getIdleTimerColor, filterCostText } from '../utils/formatting';
 
@@ -153,6 +153,11 @@ export function ClaudeOutputPanel() {
   const selectedAgentId = isSingleSelection ? selectedAgentIds[0] : null;
   const selectedAgent = selectedAgentId ? state.agents.get(selectedAgentId) : null;
   const outputs = selectedAgentId ? store.getOutputs(selectedAgentId) : [];
+
+  // Get pending permission requests for this agent
+  const pendingPermissions = selectedAgentId
+    ? store.getPendingPermissionsForAgent(selectedAgentId)
+    : [];
 
   // Per-agent state getters/setters
   const command = selectedAgentId ? (agentCommands.get(selectedAgentId) || '') : '';
@@ -466,6 +471,12 @@ export function ClaudeOutputPanel() {
         setHistory(messages);
         setHasMore(data.hasMore || false);
         setTotalCount(data.totalCount || 0);
+
+        // Clear live outputs when history is loaded to avoid duplicates
+        // History contains the definitive record from the transcript file
+        if (messages.length > 0) {
+          store.clearOutputs(selectedAgentId);
+        }
 
         // Extract last user message and store it as lastPrompt (if not already set)
         if (!state.lastPrompts.get(selectedAgentId)) {
@@ -905,6 +916,19 @@ export function ClaudeOutputPanel() {
             </>
           )}
         </div>
+        {/* Permission requests bar - compact inline display above input */}
+        {pendingPermissions.length > 0 && (
+          <div className="permission-bar">
+            {pendingPermissions.map((request) => (
+              <PermissionRequestInline
+                key={request.id}
+                request={request}
+                onApprove={(remember) => store.respondToPermissionRequest(request.id, true, undefined, remember)}
+                onDeny={() => store.respondToPermissionRequest(request.id, false)}
+              />
+            ))}
+          </div>
+        )}
         {/* Attached files display */}
         {attachedFiles.length > 0 && (
           <div className="guake-attachments">
@@ -955,9 +979,7 @@ export function ClaudeOutputPanel() {
           {useTextarea ? (
             <textarea
               ref={textareaRef}
-              placeholder={selectedAgent.status === 'working'
-                ? `Queue command for ${selectedAgent.name}... (Shift+Enter for newline)`
-                : `Command ${selectedAgent.name}... (Shift+Enter for newline, paste image)`}
+              placeholder={`Command ${selectedAgent.name}... (Shift+Enter for newline, paste image)`}
               value={command}
               onChange={e => setCommand(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -968,9 +990,7 @@ export function ClaudeOutputPanel() {
             <input
               ref={inputRef}
               type="text"
-              placeholder={selectedAgent.status === 'working'
-                ? `Queue command for ${selectedAgent.name}... (Shift+Enter for multiline)`
-                : `Command ${selectedAgent.name}... (Shift+Enter multiline, paste image)`}
+              placeholder={`Command ${selectedAgent.name}... (Shift+Enter multiline, paste image)`}
               value={command}
               onChange={e => setCommand(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -986,7 +1006,7 @@ export function ClaudeOutputPanel() {
             onClick={handleSendCommand}
             disabled={!command.trim() && attachedFiles.length === 0}
           >
-            {selectedAgent.status === 'working' ? 'Queue' : 'Send'}
+            Send
           </button>
         </div>
         {/* Agent Links Indicators - at the bottom */}
@@ -1683,6 +1703,129 @@ function GuakeAgentLink({ agent, isSelected, onClick }: GuakeAgentLinkProps) {
           {TOOL_ICONS[agent.currentTool] || TOOL_ICONS.default}
         </span>
       )}
+    </div>
+  );
+}
+
+// Permission Request Card Component
+interface PermissionRequestCardProps {
+  request: PermissionRequest;
+  onApprove: () => void;
+  onDeny: () => void;
+}
+
+function PermissionRequestCard({ request, onApprove, onDeny }: PermissionRequestCardProps) {
+  const toolIcon = TOOL_ICONS[request.tool] || TOOL_ICONS.default;
+
+  // Format tool input for display
+  const formatToolInput = (input: Record<string, unknown>): string => {
+    if (request.tool === 'Bash' && input.command) {
+      return String(input.command);
+    }
+    if ((request.tool === 'Write' || request.tool === 'Edit' || request.tool === 'Read') && input.file_path) {
+      return String(input.file_path);
+    }
+    if (request.tool === 'WebFetch' && input.url) {
+      return String(input.url);
+    }
+    // Default: stringify first few keys
+    const keys = Object.keys(input).slice(0, 2);
+    return keys.map(k => `${k}: ${JSON.stringify(input[k]).substring(0, 50)}`).join(', ');
+  };
+
+  const isPending = request.status === 'pending';
+  const isApproved = request.status === 'approved';
+  const isDenied = request.status === 'denied';
+
+  return (
+    <div className={`permission-request-card ${request.status}`}>
+      <div className="permission-request-header">
+        <span className="permission-request-icon">{toolIcon}</span>
+        <span className="permission-request-tool">{request.tool}</span>
+        {isPending && <span className="permission-request-badge">Waiting for approval</span>}
+        {isApproved && <span className="permission-request-badge approved">Approved</span>}
+        {isDenied && <span className="permission-request-badge denied">Denied</span>}
+      </div>
+      <div className="permission-request-details">
+        <code>{formatToolInput(request.toolInput)}</code>
+      </div>
+      {isPending && (
+        <div className="permission-request-actions">
+          <button className="permission-btn permission-btn-approve" onClick={onApprove}>
+            ✓ Approve
+          </button>
+          <button className="permission-btn permission-btn-deny" onClick={onDeny}>
+            ✕ Deny
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Compact inline permission request for the bottom bar
+interface PermissionRequestInlineProps {
+  request: PermissionRequest;
+  onApprove: (remember?: boolean) => void;
+  onDeny: () => void;
+}
+
+function PermissionRequestInline({ request, onApprove, onDeny }: PermissionRequestInlineProps) {
+  const toolIcon = TOOL_ICONS[request.tool] || TOOL_ICONS.default;
+
+  // Format tool input for display - very compact
+  const formatToolInputCompact = (input: Record<string, unknown>): string => {
+    if (request.tool === 'Bash' && input.command) {
+      const cmd = String(input.command);
+      return cmd.length > 40 ? cmd.substring(0, 40) + '...' : cmd;
+    }
+    if ((request.tool === 'Write' || request.tool === 'Edit' || request.tool === 'Read') && input.file_path) {
+      const path = String(input.file_path);
+      const filename = path.split('/').pop() || path;
+      return filename;
+    }
+    if (request.tool === 'WebFetch' && input.url) {
+      const url = String(input.url);
+      return url.length > 30 ? url.substring(0, 30) + '...' : url;
+    }
+    return request.tool;
+  };
+
+  // Get remember hint text based on tool
+  const getRememberHint = (): string => {
+    if (request.tool === 'Write' || request.tool === 'Edit') {
+      const filePath = String(request.toolInput.file_path || '');
+      const dir = filePath.split('/').slice(0, -1).join('/');
+      return `Remember: Allow all files in ${dir}/`;
+    }
+    if (request.tool === 'Bash') {
+      const cmd = String(request.toolInput.command || '');
+      const firstWord = cmd.split(/\s+/)[0];
+      return `Remember: Allow "${firstWord}" commands`;
+    }
+    return `Remember: Allow all ${request.tool} operations`;
+  };
+
+  if (request.status !== 'pending') return null;
+
+  return (
+    <div className="permission-inline">
+      <span className="permission-inline-icon">{toolIcon}</span>
+      <span className="permission-inline-tool">{request.tool}</span>
+      <span className="permission-inline-target">{formatToolInputCompact(request.toolInput)}</span>
+      <button
+        className="permission-inline-btn approve-remember"
+        onClick={() => onApprove(true)}
+        title={getRememberHint()}
+      >
+        ✓+
+      </button>
+      <button className="permission-inline-btn approve" onClick={() => onApprove(false)} title="Approve once">
+        ✓
+      </button>
+      <button className="permission-inline-btn deny" onClick={onDeny} title="Deny">
+        ✕
+      </button>
     </div>
   );
 }

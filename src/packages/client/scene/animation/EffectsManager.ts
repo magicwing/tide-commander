@@ -30,6 +30,15 @@ interface SleepingEffect {
 }
 
 /**
+ * Waiting permission effect data.
+ */
+interface WaitingPermissionEffect {
+  sprites: THREE.Sprite[];
+  agentId: string;
+  startTime: number;
+}
+
+/**
  * Tool icons for common tools
  */
 const TOOL_ICONS: Record<string, string> = {
@@ -53,6 +62,7 @@ export class EffectsManager {
   private moveOrderEffects: MoveOrderEffect[] = [];
   private speechBubbles: SpeechBubbleEffect[] = [];
   private sleepingEffects: SleepingEffect[] = [];
+  private waitingPermissionEffects: WaitingPermissionEffect[] = [];
   private agentMeshes: Map<string, THREE.Group> = new Map();
 
   constructor(scene: THREE.Scene) {
@@ -81,6 +91,21 @@ export class EffectsManager {
     } else if (!isSleeping && existingEffect) {
       // Remove sleeping effect
       this.removeSleepingEffect(agentId);
+    }
+  }
+
+  /**
+   * Update waiting permission effect for an agent.
+   */
+  updateWaitingPermissionEffect(agentId: string, isWaitingPermission: boolean): void {
+    const existingEffect = this.waitingPermissionEffects.find(e => e.agentId === agentId);
+
+    if (isWaitingPermission && !existingEffect) {
+      // Create waiting permission effect
+      this.createWaitingPermissionEffect(agentId);
+    } else if (!isWaitingPermission && existingEffect) {
+      // Remove waiting permission effect
+      this.removeWaitingPermissionEffect(agentId);
     }
   }
 
@@ -151,7 +176,7 @@ export class EffectsManager {
 
     // Position above and to the side of agent's head
     bubbleSprite.position.copy(agentGroup.position);
-    bubbleSprite.position.y = 2.3;
+    bubbleSprite.position.y = 2.0;
     bubbleSprite.position.x += 0.15;
 
     this.scene.add(bubbleSprite);
@@ -181,6 +206,102 @@ export class EffectsManager {
   }
 
   /**
+   * Create a waiting permission bubble effect above an agent.
+   */
+  private createWaitingPermissionEffect(agentId: string): void {
+    const agentGroup = this.agentMeshes.get(agentId);
+    if (!agentGroup) return;
+
+    const sprites: THREE.Sprite[] = [];
+
+    // Create permission bubble with lock icon
+    const bubbleCanvas = document.createElement('canvas');
+    const bubbleCtx = bubbleCanvas.getContext('2d')!;
+    bubbleCanvas.width = 128;
+    bubbleCanvas.height = 128;
+
+    // Draw thought bubble background - compact
+    bubbleCtx.fillStyle = 'rgba(40, 42, 54, 0.95)';
+    bubbleCtx.strokeStyle = '#ffcc00'; // Yellow/gold for permission
+    bubbleCtx.lineWidth = 2;
+
+    // Main bubble - centered, smaller
+    const bubbleX = 64, bubbleY = 50, bubbleR = 40;
+    bubbleCtx.beginPath();
+    bubbleCtx.arc(bubbleX, bubbleY, bubbleR, 0, Math.PI * 2);
+    bubbleCtx.fill();
+    bubbleCtx.stroke();
+
+    // Small connector bubbles - scaled down
+    bubbleCtx.beginPath();
+    bubbleCtx.arc(30, 95, 10, 0, Math.PI * 2);
+    bubbleCtx.fill();
+    bubbleCtx.stroke();
+
+    bubbleCtx.beginPath();
+    bubbleCtx.arc(18, 115, 6, 0, Math.PI * 2);
+    bubbleCtx.fill();
+    bubbleCtx.stroke();
+
+    // Draw lock icon (🔒) - smaller
+    bubbleCtx.fillStyle = '#ffcc00'; // Yellow/gold
+    bubbleCtx.font = 'bold 32px Arial';
+    bubbleCtx.textAlign = 'center';
+    bubbleCtx.textBaseline = 'middle';
+    bubbleCtx.shadowColor = '#ffcc00';
+    bubbleCtx.shadowBlur = 6;
+    bubbleCtx.fillText('🔒', bubbleX, bubbleY);
+
+    // Create bubble sprite with high quality filtering
+    const bubbleTexture = new THREE.CanvasTexture(bubbleCanvas);
+    bubbleTexture.minFilter = THREE.LinearFilter;
+    bubbleTexture.magFilter = THREE.LinearFilter;
+    bubbleTexture.needsUpdate = true;
+
+    const bubbleMaterial = new THREE.SpriteMaterial({
+      map: bubbleTexture,
+      transparent: true,
+      opacity: 0.95,
+      depthTest: false,
+    });
+
+    const bubbleSprite = new THREE.Sprite(bubbleMaterial);
+    // Tiny size
+    bubbleSprite.scale.set(0.12, 0.12, 1);
+    bubbleSprite.userData.isBubble = true;
+
+    // Position above and to the side of agent's head
+    bubbleSprite.position.copy(agentGroup.position);
+    bubbleSprite.position.y = 2.0;
+    bubbleSprite.position.x += 0.15;
+
+    this.scene.add(bubbleSprite);
+    sprites.push(bubbleSprite);
+
+    this.waitingPermissionEffects.push({
+      sprites,
+      agentId,
+      startTime: performance.now(),
+    });
+  }
+
+  /**
+   * Remove waiting permission effect for an agent.
+   */
+  private removeWaitingPermissionEffect(agentId: string): void {
+    const index = this.waitingPermissionEffects.findIndex(e => e.agentId === agentId);
+    if (index !== -1) {
+      const effect = this.waitingPermissionEffects[index];
+      for (const sprite of effect.sprites) {
+        this.scene.remove(sprite);
+        sprite.material.map?.dispose();
+        sprite.material.dispose();
+      }
+      this.waitingPermissionEffects.splice(index, 1);
+    }
+  }
+
+  /**
    * Create a speech bubble effect above an agent.
    */
   createSpeechBubble(agentId: string, toolName: string, toolInput?: Record<string, unknown>): void {
@@ -196,66 +317,63 @@ export class EffectsManager {
     // Extract key parameter to display
     const paramText = this.formatToolParams(toolName, toolInput);
 
-    // Create compact canvas - 3:1 aspect ratio for tighter bubble
+    // Create single-line canvas (4:1 aspect ratio for better text rendering)
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d')!;
-    const hasParams = !!paramText;
-    canvas.width = 420;
-    canvas.height = 140;
+    canvas.width = 400;
+    canvas.height = 100;
 
-    // Draw speech bubble background
+    // Build single-line text: "icon toolName param"
+    const fullText = paramText ? `${icon} ${toolName}: ${paramText}` : `${icon} ${toolName}`;
+
+    // Measure text to size bubble appropriately (30% larger)
+    ctx.font = 'bold 36px Arial';
+    const textWidth = Math.min(ctx.measureText(fullText).width, canvas.width - 40);
+
+    // Draw speech bubble background - pill shape
+    const padding = 16;
+    const bubbleWidth = textWidth + padding * 2;
+    const bubbleHeight = 50;
+    const bubbleX = (canvas.width - bubbleWidth) / 2;
+    const bubbleY = 10;
+    const r = bubbleHeight / 2;
+
     ctx.fillStyle = 'rgba(15, 15, 25, 0.95)';
     ctx.strokeStyle = '#4a9eff';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 3;
 
-    // Rounded rectangle with pointer - minimal padding
-    const padding = 8;
-    const x = padding, y = padding;
-    const w = canvas.width - padding * 2;
-    const h = canvas.height - padding * 2 - 16; // Small pointer
-    const r = 8;
-
+    // Draw pill shape
     ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.lineTo(x + w - r, y);
-    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-    ctx.lineTo(x + w, y + h - r);
-    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-    ctx.lineTo(x + w / 2 + 12, y + h);
-    // Pointer
-    ctx.lineTo(x + w / 2, y + h + 16);
-    ctx.lineTo(x + w / 2 - 12, y + h);
-    ctx.lineTo(x + r, y + h);
-    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-    ctx.lineTo(x, y + r);
-    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.moveTo(bubbleX + r, bubbleY);
+    ctx.lineTo(bubbleX + bubbleWidth - r, bubbleY);
+    ctx.arc(bubbleX + bubbleWidth - r, bubbleY + r, r, -Math.PI / 2, Math.PI / 2);
+    ctx.lineTo(bubbleX + r, bubbleY + bubbleHeight);
+    ctx.arc(bubbleX + r, bubbleY + r, r, Math.PI / 2, -Math.PI / 2);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
 
-    // Draw tool name with icon - compact
+    // Small pointer triangle
+    ctx.beginPath();
+    ctx.moveTo(canvas.width / 2 - 8, bubbleY + bubbleHeight);
+    ctx.lineTo(canvas.width / 2, bubbleY + bubbleHeight + 14);
+    ctx.lineTo(canvas.width / 2 + 8, bubbleY + bubbleHeight);
+    ctx.closePath();
+    ctx.fill();
+
+    // Draw single-line text (30% larger)
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 28px Arial';
+    ctx.font = 'bold 34px Arial';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    const titleY = hasParams ? 38 : 54;
-    ctx.fillText(`${icon} ${toolName}`, canvas.width / 2, titleY);
 
-    // Draw parameter text if available - closer to title
-    if (paramText) {
-      ctx.fillStyle = '#88aacc';
-      ctx.font = '18px Consolas, monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-
-      // Truncate if too long
-      const maxWidth = canvas.width - 24;
-      let displayText = paramText;
-      while (ctx.measureText(displayText).width > maxWidth && displayText.length > 3) {
-        displayText = displayText.slice(0, -4) + '...';
-      }
-      ctx.fillText(displayText, canvas.width / 2, 78);
+    // Truncate if needed
+    let displayText = fullText;
+    const maxWidth = canvas.width - 40;
+    while (ctx.measureText(displayText).width > maxWidth && displayText.length > 3) {
+      displayText = displayText.slice(0, -4) + '...';
     }
+    ctx.fillText(displayText, canvas.width / 2, bubbleY + bubbleHeight / 2);
 
     // Create sprite with high quality filtering
     const texture = new THREE.CanvasTexture(canvas);
@@ -267,14 +385,16 @@ export class EffectsManager {
       map: texture,
       transparent: true,
       opacity: 0,
+      depthTest: false,
     });
 
     const sprite = new THREE.Sprite(material);
-    // Match sprite scale to canvas aspect ratio (3:1) - compact size
-    sprite.scale.set(2.1, 0.7, 1);
+    // Match sprite scale to canvas aspect ratio (400:100 = 4:1) - single line
+    sprite.scale.set(1.6, 0.4, 1);
 
-    // Position above agent
-    const baseY = 3.5;
+    // Position just above the name label (name is at local y=-0.3 in group)
+    // Agent group position.y is typically 0, so we add the local offset
+    const baseY = agentGroup.position.y + 0.0;  // At feet level, just above name
     sprite.position.copy(agentGroup.position);
     sprite.position.y = baseY;
 
@@ -439,6 +559,9 @@ export class EffectsManager {
 
     // Update sleeping effects
     this.updateSleepingEffects();
+
+    // Update waiting permission effects
+    this.updateWaitingPermissionEffects();
   }
 
   /**
@@ -488,7 +611,7 @@ export class EffectsManager {
         // Gentle floating animation
         const floatSpeed = 0.002;
         const floatAmount = 0.04 * zoomScale;
-        sprite.position.y = 2.6 + Math.sin(elapsed * floatSpeed) * floatAmount;
+        sprite.position.y = 2.0 + Math.sin(elapsed * floatSpeed) * floatAmount;
 
         // Gentle scale pulse with zoom-based scaling - small but visible
         const scaleBase = 0.35 * zoomScale;
@@ -498,6 +621,44 @@ export class EffectsManager {
         // Fade in on creation
         const fadeIn = Math.min(elapsed / 500, 1);
         sprite.material.opacity = 0.95 * fadeIn;
+      }
+    }
+  }
+
+  /**
+   * Update waiting permission effects animation.
+   */
+  private updateWaitingPermissionEffects(): void {
+    const now = performance.now();
+
+    for (const effect of this.waitingPermissionEffects) {
+      const agentGroup = this.agentMeshes.get(effect.agentId);
+      if (!agentGroup) continue;
+
+      const elapsed = now - effect.startTime;
+
+      // Calculate zoom-based scale
+      const zoomScale = this.calculateZoomScale(agentGroup.position);
+
+      for (const sprite of effect.sprites) {
+        // Follow agent position
+        sprite.position.x = agentGroup.position.x + 0.25 * zoomScale;
+        sprite.position.z = agentGroup.position.z;
+
+        // More urgent pulsing animation (faster than sleeping)
+        const pulseSpeed = 0.004;
+        const pulseAmount = 0.06 * zoomScale;
+        sprite.position.y = 2.0 + Math.sin(elapsed * pulseSpeed) * pulseAmount;
+
+        // More pronounced scale pulse for urgency
+        const scaleBase = 0.38 * zoomScale;
+        const scalePulse = Math.sin(elapsed * 0.006) * 0.03 * zoomScale;
+        sprite.scale.set(scaleBase + scalePulse, scaleBase + scalePulse, 1);
+
+        // Pulsing opacity for attention-grabbing effect
+        const fadeIn = Math.min(elapsed / 300, 1);
+        const opacityPulse = 0.85 + Math.sin(elapsed * 0.005) * 0.1;
+        sprite.material.opacity = opacityPulse * fadeIn;
       }
     }
   }
@@ -570,8 +731,8 @@ export class EffectsManager {
         // Calculate zoom-based scale
         const zoomScale = this.calculateZoomScale(agentGroup.position);
 
-        // Apply zoom-based scaling (3:1 aspect ratio maintained)
-        bubble.sprite.scale.set(2.1 * zoomScale, 0.7 * zoomScale, 1);
+        // Apply zoom-based scaling (4:1 aspect ratio to match canvas) - 50% smaller
+        bubble.sprite.scale.set(0.8 * zoomScale, 0.2 * zoomScale, 1);
       }
 
       // Fade in/out and bob animation
@@ -579,9 +740,10 @@ export class EffectsManager {
       const fadeOut = t > 0.7 ? 1 - ((t - 0.7) / 0.3) : 1;
       bubble.sprite.material.opacity = fadeIn * fadeOut;
 
-      // Gentle bobbing
+      // Gentle bobbing - position relative to agent's y
       const bob = Math.sin(elapsed * 0.003) * 0.05;
-      bubble.sprite.position.y = bubble.baseY + bob;
+      const agentY = agentGroup ? agentGroup.position.y : 0;
+      bubble.sprite.position.y = agentY + 0.0 + bob;  // At feet level
 
       if (t >= 1) {
         toRemove.push(i);
@@ -619,6 +781,9 @@ export class EffectsManager {
     // Remove sleeping effect
     this.removeSleepingEffect(agentId);
 
+    // Remove waiting permission effect
+    this.removeWaitingPermissionEffect(agentId);
+
     // Remove speech bubble
     this.removeSpeechBubble(agentId);
 
@@ -644,5 +809,15 @@ export class EffectsManager {
       }
     }
     this.sleepingEffects = [];
+
+    // Clear waiting permission effects
+    for (const effect of this.waitingPermissionEffects) {
+      for (const sprite of effect.sprites) {
+        this.scene.remove(sprite);
+        sprite.material.map?.dispose();
+        sprite.material.dispose();
+      }
+    }
+    this.waitingPermissionEffects = [];
   }
 }

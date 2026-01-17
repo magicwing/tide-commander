@@ -31,11 +31,20 @@ export const ANIMATIONS = {
 } as const;
 
 /**
+ * Bounce animation config for jump.
+ */
+const JUMP_BOUNCE = {
+  height: 0.5,      // Max height of bounce
+  speed: 1.5,       // Bounces per second
+};
+
+/**
  * Handles agent movement and GLTF animation playback.
  */
 export class MovementAnimator {
   private movements = new Map<string, MovementState>();
   private clock = new THREE.Clock();
+  private jumpingAgents = new Set<string>(); // Track agents playing jump animation
 
   /**
    * Check if an agent is currently moving.
@@ -95,9 +104,13 @@ export class MovementAnimator {
   }): void {
     if (!meshData.mixer) return;
 
+    const agentId = meshData.group.userData.agentId as string;
+
     const clip = meshData.animations.get(animationName);
     if (!clip) {
       console.warn(`[MovementAnimator] Animation not found: ${animationName}, available:`, Array.from(meshData.animations.keys()));
+      // Stop jump bounce if switching to non-existent animation
+      this.jumpingAgents.delete(agentId);
       return;
     }
     console.log(`[MovementAnimator] Playing: ${animationName}`);
@@ -122,6 +135,18 @@ export class MovementAnimator {
     }
 
     meshData.currentAction = newAction;
+
+    // Track jump animation for bounce effect
+    if (animationName === ANIMATIONS.JUMP && loop) {
+      this.jumpingAgents.add(agentId);
+    } else {
+      this.jumpingAgents.delete(agentId);
+      // Reset character body Y position when stopping jump
+      const characterBody = meshData.group.getObjectByName('characterBody');
+      if (characterBody) {
+        characterBody.position.y = 0;
+      }
+    }
   }
 
   /**
@@ -156,6 +181,19 @@ export class MovementAnimator {
     // Update all animation mixers
     for (const meshData of agentMeshes.values()) {
       meshData.mixer?.update(deltaTime);
+    }
+
+    // Apply jump bounce effect to jumping agents
+    for (const agentId of this.jumpingAgents) {
+      const meshData = agentMeshes.get(agentId);
+      if (!meshData) continue;
+
+      const characterBody = meshData.group.getObjectByName('characterBody');
+      if (characterBody) {
+        // Use absolute sine wave for bounce (always positive, 0 to height)
+        const bounceY = Math.abs(Math.sin(now * 0.001 * JUMP_BOUNCE.speed * Math.PI * 2)) * JUMP_BOUNCE.height;
+        characterBody.position.y = bounceY;
+      }
     }
 
     // Update movement positions
@@ -235,9 +273,10 @@ export class MovementAnimator {
   }
 
   /**
-   * Clear all movements.
+   * Clear all movements and effects.
    */
   clear(): void {
     this.movements.clear();
+    this.jumpingAgents.clear();
   }
 }

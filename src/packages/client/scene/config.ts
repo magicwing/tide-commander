@@ -8,6 +8,7 @@ export const AGENT_CLASS_CONFIG: Record<AgentClass, { icon: string; color: numbe
   architect: { icon: '📐', color: 0x9e4aff, description: 'Plans and designs systems' },
   warrior: { icon: '⚔️', color: 0xff4a9e, description: 'Tackles tough problems' },
   support: { icon: '💚', color: 0x4aff9e, description: 'Helps and assists others' },
+  boss: { icon: '👑', color: 0xffd700, description: 'Manages and delegates to subordinates' },
 };
 
 // Default LOTR names for agents
@@ -28,6 +29,7 @@ export const AGENT_CLASS_MODELS: Record<AgentClass, string> = {
   architect: 'character-male-c.glb',
   warrior: 'character-female-b.glb',
   support: 'character-female-c.glb',
+  boss: 'character-male-c.glb', // Boss uses architect model (distinguished by crown)
 };
 
 // Character model display info for the selector

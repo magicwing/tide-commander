@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { store, useStore } from '../store';
 import { AGENT_CLASS_CONFIG, LOTR_NAMES, CHARACTER_MODELS } from '../scene/config';
-import type { AgentClass } from '../../shared/types';
+import type { AgentClass, PermissionMode } from '../../shared/types';
+import { PERMISSION_MODES } from '../../shared/types';
 import { intToHex } from '../utils/formatting';
 import { ModelPreview } from './ModelPreview';
 
@@ -46,6 +47,7 @@ export function SpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: SpawnM
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [useChrome, setUseChrome] = useState(true); // Enabled by default
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypass'); // Default to permissionless
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch Claude sessions
@@ -122,7 +124,7 @@ export function SpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: SpawnM
     setIsSpawning(true);
     onSpawnStart();
 
-    store.spawnAgent(name.trim(), selectedClass, effectiveCwd.trim(), undefined, selectedSessionId || undefined, useChrome);
+    store.spawnAgent(name.trim(), selectedClass, effectiveCwd.trim(), undefined, selectedSessionId || undefined, useChrome, permissionMode);
   };
 
   const handleSuccess = () => {
@@ -189,7 +191,10 @@ export function SpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: SpawnM
       <div
         className="modal-overlay visible"
         onClick={handleCancelCreateDir}
-        onKeyDown={(e) => e.key === 'Escape' && handleCancelCreateDir()}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') handleCancelCreateDir();
+          if (e.key === 'Enter') handleCreateDirectory();
+        }}
       >
         <div className="modal confirm-modal" onClick={(e) => e.stopPropagation()}>
           <div className="modal-header">Directory Not Found</div>
@@ -202,7 +207,7 @@ export function SpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: SpawnM
             <button className="btn btn-secondary" onClick={handleCancelCreateDir}>
               Cancel
             </button>
-            <button className="btn btn-primary" onClick={handleCreateDirectory}>
+            <button className="btn btn-primary" onClick={handleCreateDirectory} autoFocus>
               Create Directory
             </button>
           </div>
@@ -343,6 +348,27 @@ export function SpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: SpawnM
                   Use Chrome browser
                 </span>
               </label>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Permission Mode</label>
+              <div className="permission-mode-selector">
+                {(Object.keys(PERMISSION_MODES) as PermissionMode[]).map((mode) => (
+                  <div
+                    key={mode}
+                    className={`permission-mode-option ${permissionMode === mode ? 'selected' : ''}`}
+                    onClick={() => setPermissionMode(mode)}
+                  >
+                    <div className="permission-mode-icon">
+                      {mode === 'bypass' ? '⚡' : '🔐'}
+                    </div>
+                    <div className="permission-mode-info">
+                      <div className="permission-mode-label">{PERMISSION_MODES[mode].label}</div>
+                      <div className="permission-mode-desc">{PERMISSION_MODES[mode].description}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>

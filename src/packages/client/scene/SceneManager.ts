@@ -11,6 +11,7 @@ import { MovementAnimator, EffectsManager, ANIMATIONS } from './animation';
 import { Battlefield } from './environment';
 import { InputHandler } from './input';
 import { DrawingManager } from './drawing';
+import { BuildingManager } from './buildings';
 
 /**
  * Main scene orchestrator that coordinates all subsystems.
@@ -31,6 +32,7 @@ export class SceneManager {
   private battlefield: Battlefield;
   private inputHandler: InputHandler;
   private drawingManager: DrawingManager;
+  private buildingManager: BuildingManager;
 
   // State
   private agentMeshes = new Map<string, AgentMeshData>();
@@ -40,6 +42,13 @@ export class SceneManager {
   private lastIdleTimerUpdate = 0;
   private characterScale = 0.5;
   private indicatorScale = 1.0;
+  private idleAnimation: string = ANIMATIONS.SIT;
+  private workingAnimation: string = ANIMATIONS.WALK;
+
+  // Callbacks
+  private onAreaDoubleClickCallback: ((areaId: string) => void) | null = null;
+  private onBuildingClickCallback: ((buildingId: string) => void) | null = null;
+  private onBuildingDoubleClickCallback: ((buildingId: string) => void) | null = null;
 
   constructor(canvas: HTMLCanvasElement, selectionBox: HTMLDivElement) {
     this.canvas = canvas;
@@ -59,6 +68,7 @@ export class SceneManager {
     this.effectsManager = new EffectsManager(this.scene);
     this.battlefield = new Battlefield(this.scene);
     this.drawingManager = new DrawingManager(this.scene);
+    this.buildingManager = new BuildingManager(this.scene);
 
     this.inputHandler = new InputHandler(
       canvas,
@@ -78,6 +88,13 @@ export class SceneManager {
         onResizeStart: this.handleResizeStart.bind(this),
         onResizeMove: this.handleResizeMove.bind(this),
         onResizeEnd: this.handleResizeEnd.bind(this),
+        onAreaDoubleClick: this.handleAreaDoubleClick.bind(this),
+        onGroundClickOutsideArea: this.handleGroundClickOutsideArea.bind(this),
+        onBuildingClick: this.handleBuildingClick.bind(this),
+        onBuildingDoubleClick: this.handleBuildingDoubleClick.bind(this),
+        onBuildingDragStart: this.handleBuildingDragStart.bind(this),
+        onBuildingDragMove: this.handleBuildingDragMove.bind(this),
+        onBuildingDragEnd: this.handleBuildingDragEnd.bind(this),
       }
     );
 
@@ -89,6 +106,15 @@ export class SceneManager {
       () => this.drawingManager.getResizeHandles(),
       () => this.drawingManager.isCurrentlyResizing()
     );
+
+    // Set up area at position getter (for double-click detection)
+    this.inputHandler.setAreaAtPositionGetter((pos) => this.drawingManager.getAreaAtPosition(pos));
+
+    // Set up building at position getter (for drag/click detection)
+    this.inputHandler.setBuildingAtPositionGetter((pos) => {
+      const building = this.buildingManager.getBuildingAtPosition(pos);
+      return building ? { id: building.id } : null;
+    });
 
     // Create environment
     this.battlefield.create();
@@ -154,6 +180,9 @@ export class SceneManager {
     controls.enablePan = true;
     controls.screenSpacePanning = true;
 
+    // Disable default zoom - we handle it in InputHandler for mouse-position-aware zooming
+    controls.enableZoom = false;
+
     return controls;
   }
 
@@ -185,10 +214,11 @@ export class SceneManager {
         // Use current mesh position, not stored agent position (handles animation)
         newMeshData.group.position.copy(currentPosition);
 
-        // Apply current character scale
+        // Apply current character scale (with boss multiplier if applicable)
         const newBody = newMeshData.group.getObjectByName('characterBody');
         if (newBody) {
-          newBody.scale.setScalar(this.characterScale);
+          const bossMultiplier = agent.class === 'boss' ? 1.5 : 1.0;
+          newBody.scale.setScalar(this.characterScale * bossMultiplier);
         }
 
         // Replace in scene
@@ -223,10 +253,11 @@ export class SceneManager {
     this.scene.add(meshData.group);
     this.agentMeshes.set(agent.id, meshData);
 
-    // Apply current character scale
+    // Apply current character scale (with boss multiplier if applicable)
     const body = meshData.group.getObjectByName('characterBody');
     if (body) {
-      body.scale.setScalar(this.characterScale);
+      const bossMultiplier = agent.class === 'boss' ? 1.5 : 1.0;
+      body.scale.setScalar(this.characterScale * bossMultiplier);
     }
 
     // Set animation based on agent's current status
@@ -282,13 +313,14 @@ export class SceneManager {
    * Update agent animation based on status
    */
   private updateStatusAnimation(agent: Agent, meshData: AgentMeshData): void {
-    // Map status to animation
+    // Map status to animation (using configurable idle and working animations)
     const statusAnimations: Record<string, string> = {
-      idle: ANIMATIONS.SIT,       // Sitting/resting when idle
-      working: ANIMATIONS.WALK,   // Active movement when working
-      waiting: ANIMATIONS.IDLE,   // Standing when waiting
-      error: ANIMATIONS.EMOTE_NO, // Error shake
-      offline: ANIMATIONS.STATIC, // Static when offline
+      idle: this.idleAnimation,       // Configurable idle animation
+      working: this.workingAnimation, // Configurable working animation
+      waiting: ANIMATIONS.IDLE,       // Standing when waiting
+      waiting_permission: ANIMATIONS.IDLE, // Standing when waiting for permission
+      error: ANIMATIONS.EMOTE_NO,     // Error shake
+      offline: ANIMATIONS.STATIC,     // Static when offline
     };
 
     const animation = statusAnimations[agent.status] || ANIMATIONS.IDLE;
@@ -297,21 +329,33 @@ export class SceneManager {
     console.log(`[SceneManager] Agent ${agent.name} status=${agent.status}, animation=${animation}, current=${currentClipName}, hasAnimations=${meshData.animations.size}`);
     console.log(`[SceneManager] Available animations:`, Array.from(meshData.animations.keys()));
 
-    // Always play animation if status is idle (to ensure sit), or if animation changed
-    const shouldPlay = agent.status === 'idle' || currentClipName !== animation;
+    // One-shot animations that should only play once (not for idle/working status)
+    const oneShotAnimations: string[] = [ANIMATIONS.DIE, ANIMATIONS.EMOTE_NO, ANIMATIONS.EMOTE_YES];
+    // Jump is only one-shot when NOT used as a configured idle/working animation
+    const isConfiguredAnimation = animation === this.idleAnimation || animation === this.workingAnimation;
+    const isOneShot = oneShotAnimations.includes(animation) ||
+      (animation === ANIMATIONS.JUMP && !isConfiguredAnimation);
+
+    // Don't replay one-shot animations if already playing/finished
+    const shouldPlay = isOneShot
+      ? currentClipName !== animation
+      : agent.status === 'idle' || currentClipName !== animation;
 
     if (shouldPlay) {
       const options = agent.status === 'working'
         ? { timeScale: 1.5 }
-        : agent.status === 'error'
+        : isOneShot
           ? { loop: false }
           : {};
-      console.log(`[SceneManager] Playing animation: ${animation}`);
+      console.log(`[SceneManager] Playing animation: ${animation}, oneShot: ${isOneShot}`);
       this.movementAnimator.playAnimation(meshData, animation, options);
     }
 
-    // Update effects manager reference (sleeping effect disabled, using status dot instead)
+    // Update effects manager reference and status-based effects
     this.effectsManager.setAgentMeshes(this.agentMeshes);
+
+    // Show/hide waiting permission effect based on status
+    this.effectsManager.updateWaitingPermissionEffect(agent.id, agent.status === 'waiting_permission');
   }
 
   syncAgents(agents: Agent[]): void {
@@ -395,6 +439,73 @@ export class SceneManager {
     this.drawingManager.highlightArea(areaId);
   }
 
+  /**
+   * Clear area selection and hide resize handles.
+   */
+  clearAreaSelection(): void {
+    this.drawingManager.highlightArea(null);
+  }
+
+  /**
+   * Set callback for area double-click.
+   */
+  setOnAreaDoubleClick(callback: (areaId: string) => void): void {
+    this.onAreaDoubleClickCallback = callback;
+  }
+
+  // ============================================
+  // Public API - Buildings
+  // ============================================
+
+  /**
+   * Add a building to the scene.
+   */
+  addBuilding(building: import('../../shared/types').Building): void {
+    this.buildingManager.addBuilding(building);
+  }
+
+  /**
+   * Remove a building from the scene.
+   */
+  removeBuilding(buildingId: string): void {
+    this.buildingManager.removeBuilding(buildingId);
+  }
+
+  /**
+   * Update a building in the scene.
+   */
+  updateBuilding(building: import('../../shared/types').Building): void {
+    this.buildingManager.updateBuilding(building);
+  }
+
+  /**
+   * Sync buildings from store.
+   */
+  syncBuildings(): void {
+    this.buildingManager.syncFromStore();
+  }
+
+  /**
+   * Highlight a building (when selected).
+   */
+  highlightBuilding(buildingId: string | null): void {
+    this.buildingManager.highlightBuilding(buildingId);
+  }
+
+  /**
+   * Set callback for building click.
+   */
+  setOnBuildingClick(callback: (buildingId: string) => void): void {
+    this.onBuildingClickCallback = callback;
+  }
+
+  /**
+   * Set callback for building double-click.
+   */
+  setOnBuildingDoubleClick(callback: (buildingId: string) => void): void {
+    this.onBuildingDoubleClickCallback = callback;
+  }
+
   // ============================================
   // Public API - Config
   // ============================================
@@ -404,11 +515,13 @@ export class SceneManager {
    */
   setCharacterScale(scale: number): void {
     this.characterScale = scale;
-    // Update all existing character models
+    // Update all existing character models (with boss multiplier if applicable)
     for (const meshData of this.agentMeshes.values()) {
       const body = meshData.group.getObjectByName('characterBody');
       if (body) {
-        body.scale.setScalar(scale);
+        const isBoss = meshData.group.userData.isBoss === true;
+        const bossMultiplier = isBoss ? 1.5 : 1.0;
+        body.scale.setScalar(scale * bossMultiplier);
       }
     }
   }
@@ -464,6 +577,36 @@ export class SceneManager {
    */
   setFloorStyle(style: string, force = false): void {
     this.battlefield.setFloorStyle(style as import('./environment/Battlefield').FloorStyle, force);
+  }
+
+  /**
+   * Set animation for idle status.
+   */
+  setIdleAnimation(animation: string): void {
+    this.idleAnimation = animation;
+    // Update all idle agents to use new animation
+    const state = store.getState();
+    for (const [agentId, meshData] of this.agentMeshes) {
+      const agent = state.agents.get(agentId);
+      if (agent && agent.status === 'idle' && !this.movementAnimator.isMoving(agentId)) {
+        this.movementAnimator.playAnimation(meshData, animation);
+      }
+    }
+  }
+
+  /**
+   * Set animation for working status.
+   */
+  setWorkingAnimation(animation: string): void {
+    this.workingAnimation = animation;
+    // Update all working agents to use new animation
+    const state = store.getState();
+    for (const [agentId, meshData] of this.agentMeshes) {
+      const agent = state.agents.get(agentId);
+      if (agent && agent.status === 'working' && !this.movementAnimator.isMoving(agentId)) {
+        this.movementAnimator.playAnimation(meshData, animation, { timeScale: 1.5 });
+      }
+    }
   }
 
   // ============================================
@@ -566,6 +709,47 @@ export class SceneManager {
     this.drawingManager.finishResize();
   }
 
+  // Area handlers
+  private handleAreaDoubleClick(areaId: string): void {
+    // Select the area in the store
+    store.selectArea(areaId);
+    // Trigger callback (to open toolbox)
+    this.onAreaDoubleClickCallback?.(areaId);
+  }
+
+  private handleGroundClickOutsideArea(): void {
+    // Clear area selection and hide resize handles when clicking outside
+    store.selectArea(null);
+    this.drawingManager.highlightArea(null);
+  }
+
+  // Building handlers
+  private handleBuildingClick(buildingId: string): void {
+    store.selectBuilding(buildingId);
+    this.buildingManager.highlightBuilding(buildingId);
+    this.onBuildingClickCallback?.(buildingId);
+  }
+
+  private handleBuildingDoubleClick(buildingId: string): void {
+    store.selectBuilding(buildingId);
+    this.buildingManager.highlightBuilding(buildingId);
+    this.onBuildingDoubleClickCallback?.(buildingId);
+  }
+
+  private handleBuildingDragStart(_buildingId: string, _pos: { x: number; z: number }): void {
+    // Drag started - nothing special to do
+  }
+
+  private handleBuildingDragMove(buildingId: string, pos: { x: number; z: number }): void {
+    // Update visual position during drag
+    this.buildingManager.setBuildingPosition(buildingId, pos);
+  }
+
+  private handleBuildingDragEnd(buildingId: string, pos: { x: number; z: number }): void {
+    // Persist the new position to store and server
+    store.updateBuildingPosition(buildingId, pos);
+  }
+
   // ============================================
   // Animation Loop
   // ============================================
@@ -601,6 +785,7 @@ export class SceneManager {
     // Update animations
     const completedMovements = this.movementAnimator.update(this.agentMeshes);
     this.effectsManager.update();
+    this.buildingManager.update(deltaTime);
 
     // Re-apply status animations for agents that just finished moving
     if (completedMovements.length > 0) {
@@ -631,6 +816,7 @@ export class SceneManager {
     for (const [agentId, meshData] of this.agentMeshes) {
       const agent = state.agents.get(agentId);
       if (agent && agent.status === 'idle') {
+        // Update idle timer display
         this.characterFactory.updateIdleTimer(meshData.group, agent.status, agent.lastActivity);
       }
     }
@@ -649,25 +835,22 @@ export class SceneManager {
       // Calculate zoom-based scale for indicators
       const indicatorScale = this.calculateIndicatorScale(meshData.group.position);
 
-      // Animate and scale status orb
-      const statusOrb = meshData.group.getObjectByName('statusOrb') as THREE.Mesh;
-      if (statusOrb) {
-        if (!isMoving) {
-          statusOrb.position.y = 2.8 + Math.sin(time * 2 + parseFloat(id)) * 0.08;
-        }
-        statusOrb.scale.setScalar(indicatorScale);
-      }
-
-      // Scale name label
+      // Scale name label (50% smaller)
       const nameLabel = meshData.group.getObjectByName('nameLabel') as THREE.Sprite;
       if (nameLabel) {
-        nameLabel.scale.set(1.2 * indicatorScale, 0.6 * indicatorScale, 1);
+        nameLabel.scale.set(0.6 * indicatorScale, 0.3 * indicatorScale, 1);
       }
 
       // Scale mana bar
       const manaBar = meshData.group.getObjectByName('manaBar') as THREE.Sprite;
       if (manaBar) {
         manaBar.scale.set(0.9 * indicatorScale, 0.14 * indicatorScale, 1);
+      }
+
+      // Scale idle timer (same as mana bar for alignment)
+      const idleTimer = meshData.group.getObjectByName('idleTimer') as THREE.Sprite;
+      if (idleTimer) {
+        idleTimer.scale.set(0.9 * indicatorScale, 0.14 * indicatorScale, 1);
       }
     }
 
@@ -735,6 +918,7 @@ export class SceneManager {
     window.removeEventListener('resize', this.onWindowResize);
     this.inputHandler.dispose();
     this.drawingManager.dispose();
+    this.buildingManager.dispose();
     this.effectsManager.clear();
     this.renderer.dispose();
     this.controls.dispose();

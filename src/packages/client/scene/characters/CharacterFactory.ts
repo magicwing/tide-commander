@@ -10,6 +10,7 @@ const STATUS_COLORS: Record<string, number> = {
   idle: 0x4aff9e,
   working: 0x4a9eff,
   waiting: 0xff9e4a,
+  waiting_permission: 0xffcc00, // Yellow/gold for awaiting permission
   error: 0xff4a4a,
   default: 0x888888,
 };
@@ -39,33 +40,39 @@ export class CharacterFactory {
 
     const classConfig = AGENT_CLASS_CONFIG[agent.class];
 
+    // Boss agents are 1.5x larger (scaling is applied by SceneManager.addAgent)
+    const isBoss = agent.class === 'boss';
+
     // Character body (3D model or fallback capsule)
     const { body, mixer, animations } = this.createCharacterBody(agent, classConfig.color);
     group.add(body);
 
-    // Selection ring (shows when agent is selected)
-    const selectionRing = this.createSelectionRing(classConfig.color);
+    // Selection ring (shows when agent is selected) - larger for boss
+    const selectionRing = this.createSelectionRing(classConfig.color, isBoss);
     group.add(selectionRing);
 
-    // Status orb
-    const statusOrb = this.createStatusOrb(agent.status);
-    group.add(statusOrb);
-
-    // Name label
-    const nameLabel = this.createNameLabel(agent.name, classConfig.color);
+    // Name label - higher position for boss
+    const nameLabel = this.createNameLabel(agent.name, classConfig.color, isBoss);
     group.add(nameLabel);
 
-    // Mana bar with status indicator (context remaining + status dot + task count)
-    const manaBar = this.createManaBar(agent.contextUsed, agent.contextLimit, agent.status, agent.taskCount || 0);
+    // Mana bar with status indicator (context remaining + status dot) - higher for boss
+    const manaBar = this.createManaBar(agent.contextUsed, agent.contextLimit, agent.status, isBoss);
     group.add(manaBar);
 
-    // Idle timer indicator (shows when agent is idle)
-    const idleTimer = this.createIdleTimer(agent.status, agent.lastActivity);
+    // Idle timer indicator (shows when agent is idle) - positioned just above mana bar
+    const idleTimer = this.createIdleTimer(agent.status, agent.lastActivity, isBoss);
     group.add(idleTimer);
+
+    // Crown indicator for boss agents
+    if (isBoss) {
+      const crownIndicator = this.createBossCrown();
+      group.add(crownIndicator);
+    }
 
     // Store agent metadata for updates
     group.userData.agentName = agent.name;
     group.userData.agentClass = agent.class;
+    group.userData.isBoss = isBoss;
 
     // Set initial position
     group.position.set(agent.position.x, agent.position.y, agent.position.z);
@@ -138,8 +145,9 @@ export class CharacterFactory {
   /**
    * Create the selection ring indicator.
    */
-  private createSelectionRing(color: number): THREE.Mesh {
-    const geometry = new THREE.RingGeometry(0.8, 0.95, 32);
+  private createSelectionRing(color: number, isBoss: boolean = false): THREE.Mesh {
+    const scale = isBoss ? 1.5 : 1.0;
+    const geometry = new THREE.RingGeometry(0.8 * scale, 0.95 * scale, 32);
     const material = new THREE.MeshBasicMaterial({
       color,
       side: THREE.DoubleSide,
@@ -156,25 +164,9 @@ export class CharacterFactory {
   }
 
   /**
-   * Create the status orb indicator.
-   */
-  private createStatusOrb(status: string): THREE.Mesh {
-    const geometry = new THREE.SphereGeometry(0.15, 16, 16);
-    const material = new THREE.MeshBasicMaterial({
-      color: this.getStatusColor(status),
-    });
-
-    const orb = new THREE.Mesh(geometry, material);
-    orb.position.y = 2.8; // Above the name label
-    orb.name = 'statusOrb';
-
-    return orb;
-  }
-
-  /**
    * Create a text sprite for the agent's name.
    */
-  private createNameLabel(name: string, color: number): THREE.Sprite {
+  private createNameLabel(name: string, color: number, isBoss: boolean = false): THREE.Sprite {
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d')!;
 
@@ -221,17 +213,18 @@ export class CharacterFactory {
 
     // Create sprite - proper 2:1 aspect ratio matching canvas
     const sprite = new THREE.Sprite(material);
-    sprite.position.y = -0.3; // Below the character (at feet level)
-    sprite.scale.set(1.2, 0.6, 1); // Larger size, maintains 2:1 aspect ratio
+    // Position higher for boss agents
+    sprite.position.y = isBoss ? -0.2 : -0.3; // Below the character (at feet level)
+    sprite.scale.set(isBoss ? 1.5 : 1.2, isBoss ? 0.75 : 0.6, 1); // Larger for boss
     sprite.name = 'nameLabel';
 
     return sprite;
   }
 
   /**
-   * Create a mana bar showing context remaining with status indicator and task count.
+   * Create a mana bar showing context remaining with status indicator.
    */
-  private createManaBar(contextUsed: number, contextLimit: number, status: string, taskCount: number): THREE.Sprite {
+  private createManaBar(contextUsed: number, contextLimit: number, status: string, isBoss: boolean = false): THREE.Sprite {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d')!;
 
@@ -239,7 +232,7 @@ export class CharacterFactory {
     canvas.width = 400;
     canvas.height = 64;
 
-    this.drawManaBar(ctx, canvas.width, canvas.height, contextUsed, contextLimit, status, taskCount);
+    this.drawManaBar(ctx, canvas.width, canvas.height, contextUsed, contextLimit, status);
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.minFilter = THREE.LinearFilter;
@@ -253,15 +246,16 @@ export class CharacterFactory {
     });
 
     const sprite = new THREE.Sprite(material);
-    sprite.position.y = 2.0; // Below the name label
-    sprite.scale.set(1.1, 0.18, 1); // Wider to fit status dot + bar
+    // Position higher for boss agents
+    sprite.position.y = isBoss ? 3.0 : 2.0; // Below the name label
+    sprite.scale.set(isBoss ? 1.4 : 1.1, isBoss ? 0.22 : 0.18, 1); // Wider to fit status dot + bar
     sprite.name = 'manaBar';
 
     return sprite;
   }
 
   /**
-   * Draw the mana bar on a canvas context with status indicator and task count.
+   * Draw the mana bar on a canvas context with status indicator.
    */
   private drawManaBar(
     ctx: CanvasRenderingContext2D,
@@ -269,8 +263,7 @@ export class CharacterFactory {
     height: number,
     contextUsed: number,
     contextLimit: number,
-    status: string,
-    taskCount: number
+    status: string
   ): void {
     // Calculate percentage remaining
     const used = contextUsed || 0;
@@ -353,15 +346,15 @@ export class CharacterFactory {
       ctx.shadowBlur = 0;
     }
 
-    // Percentage text - scale font size
+    // Percentage text - scale font size (75% of original)
     const percentText = `${Math.round(percentage * 100)}%`;
-    ctx.font = `bold ${Math.round(32 * scale)}px Arial`;
+    ctx.font = `bold ${Math.round(24 * scale)}px Arial`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
     // Thick black outline
     ctx.strokeStyle = '#000000';
-    ctx.lineWidth = 5 * scale;
+    ctx.lineWidth = 4 * scale;
     ctx.strokeText(percentText, width / 2, height / 2);
 
     // Bright white fill
@@ -371,49 +364,18 @@ export class CharacterFactory {
     ctx.fillText(percentText, width / 2, height / 2);
     ctx.shadowBlur = 0;
 
-    // Task count badge (right side of the bar)
-    if (taskCount > 0) {
-      const badgeX = width - 30 * scale;
-      const badgeY = height / 2;
-      const badgeRadius = 14 * scale;
-
-      // Badge background (orange/gold)
-      ctx.beginPath();
-      ctx.arc(badgeX, badgeY, badgeRadius, 0, Math.PI * 2);
-      ctx.fillStyle = '#ff9900';
-      ctx.fill();
-
-      // Badge glow
-      ctx.shadowColor = '#ff9900';
-      ctx.shadowBlur = 6 * scale;
-      ctx.fill();
-      ctx.shadowBlur = 0;
-
-      // Badge border
-      ctx.strokeStyle = '#000000';
-      ctx.lineWidth = 2 * scale;
-      ctx.stroke();
-
-      // Task count text
-      const countText = taskCount > 99 ? '99+' : String(taskCount);
-      ctx.font = `bold ${Math.round(18 * scale)}px Arial`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle = '#000000';
-      ctx.fillText(countText, badgeX, badgeY);
-    }
   }
 
   /**
    * Create an idle timer indicator showing time since last activity.
    */
-  private createIdleTimer(status: string, lastActivity: number): THREE.Sprite {
+  private createIdleTimer(status: string, lastActivity: number, isBoss: boolean = false): THREE.Sprite {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d')!;
 
-    // Larger canvas size for better visibility
+    // Same canvas ratio as mana bar (400:64) for alignment
     canvas.width = 400;
-    canvas.height = 80;
+    canvas.height = 64;
 
     this.drawIdleTimer(ctx, canvas.width, canvas.height, status, lastActivity);
 
@@ -429,9 +391,48 @@ export class CharacterFactory {
     });
 
     const sprite = new THREE.Sprite(material);
-    sprite.position.y = 2.5; // Above mana bar (name is now below character)
-    sprite.scale.set(2.0, 0.4, 1); // Large scale for good visibility
+    // Position higher for boss agents
+    sprite.position.set(0, isBoss ? 3.5 : 2.4, 0); // Above mana bar
+    sprite.scale.set(isBoss ? 1.4 : 1.1, isBoss ? 0.22 : 0.18, 1); // Same scale as mana bar for alignment
     sprite.name = 'idleTimer';
+
+    return sprite;
+  }
+
+  /**
+   * Create a crown indicator for boss agents.
+   */
+  private createBossCrown(): THREE.Sprite {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d')!;
+
+    canvas.width = 128;
+    canvas.height = 128;
+
+    // Clear canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Draw crown emoji
+    ctx.font = '96px serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('👑', canvas.width / 2, canvas.height / 2);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.needsUpdate = true;
+
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false,
+    });
+
+    const sprite = new THREE.Sprite(material);
+    sprite.position.set(0, 4.0, 0); // Above the character's head (scaled for 1.5x)
+    sprite.scale.set(0.8, 0.8, 1);
+    sprite.name = 'bossCrown';
 
     return sprite;
   }
@@ -551,9 +552,9 @@ export class CharacterFactory {
 
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d')!;
-    // Match the larger canvas size from createIdleTimer
+    // Match canvas size from createIdleTimer (same as mana bar)
     canvas.width = 400;
-    canvas.height = 80;
+    canvas.height = 64;
 
     this.drawIdleTimer(ctx, canvas.width, canvas.height, status, lastActivity);
 
@@ -565,7 +566,7 @@ export class CharacterFactory {
   /**
    * Update the mana bar for an agent.
    */
-  updateManaBar(group: THREE.Group, contextUsed: number, contextLimit: number, status: string, taskCount: number): void {
+  updateManaBar(group: THREE.Group, contextUsed: number, contextLimit: number, status: string): void {
     const manaBar = group.getObjectByName('manaBar') as THREE.Sprite;
     if (!manaBar) return;
 
@@ -578,7 +579,7 @@ export class CharacterFactory {
     canvas.width = 400;
     canvas.height = 64;
 
-    this.drawManaBar(ctx, canvas.width, canvas.height, contextUsed, contextLimit, status, taskCount);
+    this.drawManaBar(ctx, canvas.width, canvas.height, contextUsed, contextLimit, status);
 
     // Update texture
     material.map.image = canvas;
@@ -644,22 +645,14 @@ export class CharacterFactory {
       group.userData.agentName = agent.name;
     }
 
-    // Update status orb color
-    const statusOrb = group.getObjectByName('statusOrb') as THREE.Mesh;
-    if (statusOrb) {
-      (statusOrb.material as THREE.MeshBasicMaterial).color.setHex(
-        this.getStatusColor(agent.status)
-      );
-    }
-
     // Update selection ring visibility
     const selectionRing = group.getObjectByName('selectionRing') as THREE.Mesh;
     if (selectionRing) {
       (selectionRing.material as THREE.MeshBasicMaterial).opacity = isSelected ? 0.8 : 0;
     }
 
-    // Update mana bar (includes status dot and task count)
-    this.updateManaBar(group, agent.contextUsed, agent.contextLimit, agent.status, agent.taskCount || 0);
+    // Update mana bar (includes status dot)
+    this.updateManaBar(group, agent.contextUsed, agent.contextLimit, agent.status);
 
     // Update idle timer
     this.updateIdleTimer(group, agent.status, agent.lastActivity);

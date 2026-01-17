@@ -381,6 +381,183 @@
   text-overflow: ellipsis;
 }
 
+.unit-permission-mode {
+  padding: 8px;
+  background: $bg-tertiary;
+  border-radius: $radius-md;
+  margin-bottom: 12px;
+}
+
+.unit-permission-mode-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: $radius-sm;
+  cursor: help;
+}
+
+.unit-permission-mode-icon {
+  font-size: 12px;
+}
+
+.unit-permission-mode-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: $text-primary;
+}
+
+// Remembered patterns section
+.unit-remembered-patterns {
+  padding: 8px;
+  background: $bg-tertiary;
+  border-radius: $radius-md;
+  margin-bottom: 12px;
+}
+
+.unit-remembered-patterns-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  padding: 2px 0;
+
+  &:hover {
+    .unit-stat-label {
+      color: $text-primary;
+    }
+  }
+}
+
+.unit-remembered-patterns-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: $text-secondary;
+}
+
+.unit-remembered-patterns-count {
+  background: $accent-cyan;
+  color: $bg-primary;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 8px;
+}
+
+.unit-remembered-patterns-list {
+  margin-top: 8px;
+}
+
+.unit-remembered-patterns-empty {
+  font-size: 10px;
+  color: $text-secondary;
+  font-style: italic;
+  padding: 4px 0;
+}
+
+.unit-remembered-pattern-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: $radius-sm;
+  margin-bottom: 4px;
+  font-size: 10px;
+
+  &:last-of-type {
+    margin-bottom: 0;
+  }
+}
+
+.unit-pattern-tool {
+  font-family: $font-mono;
+  font-weight: 600;
+  color: $accent-cyan;
+  flex-shrink: 0;
+}
+
+.unit-pattern-desc {
+  flex: 1;
+  color: $text-secondary;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.unit-pattern-remove {
+  width: 16px;
+  height: 16px;
+  border: none;
+  background: transparent;
+  color: $text-secondary;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: $radius-sm;
+  transition: all $transition-fast;
+  flex-shrink: 0;
+
+  &:hover {
+    background: rgba($accent-red, 0.2);
+    color: $accent-red;
+  }
+}
+
+.unit-patterns-clear-all {
+  width: 100%;
+  margin-top: 8px;
+  padding: 4px 8px;
+  font-size: 10px;
+  font-family: $font-mono;
+  background: transparent;
+  border: 1px solid rgba($accent-red, 0.3);
+  color: $accent-red;
+  border-radius: $radius-sm;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    background: rgba($accent-red, 0.1);
+    border-color: $accent-red;
+  }
+}
+
+.unit-resume-cmd {
+  padding: 8px;
+  background: $bg-tertiary;
+  border-radius: $radius-md;
+  margin-bottom: 12px;
+}
+
+.unit-resume-cmd-text {
+  font-size: 10px;
+  font-family: $font-mono;
+  color: $dracula-cyan;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  padding: 4px 6px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: $radius-sm;
+  transition: background $transition-fast;
+
+  &:hover {
+    background: rgba($accent-blue, 0.2);
+  }
+
+  &:active {
+    background: rgba($accent-blue, 0.3);
+  }
+}
+
 .unit-actions {
   display: flex;
   gap: 8px;
@@ -416,8 +593,23 @@
   &.idle { background: $accent-green; }
   &.working { background: $accent-blue; }
   &.waiting { background: $accent-orange; }
+  &.waiting_permission {
+    background: #ffcc00;
+    animation: pulse-permission 1.5s ease-in-out infinite;
+  }
   &.error { background: $accent-red; }
   &.offline { background: $text-secondary; }
+}
+
+@keyframes pulse-permission {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(255, 204, 0, 0.4);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(255, 204, 0, 0);
+    transform: scale(1.1);
+  }
 }
 
 // Agents list view

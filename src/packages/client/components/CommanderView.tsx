@@ -5,6 +5,7 @@ import { useStore, store, ClaudeOutput } from '../store';
 import type { Agent, DrawingArea, AgentClass } from '../../shared/types';
 import { AGENT_CLASS_CONFIG, LOTR_NAMES, CHARACTER_MODELS } from '../scene/config';
 import { FileExplorerPanel } from './FileExplorerPanel';
+import { matchesShortcut } from '../store/shortcuts';
 
 interface HistoryMessage {
   type: 'user' | 'assistant' | 'tool_use' | 'tool_result';
@@ -255,8 +256,14 @@ export function CommanderView({ isOpen, onClose }: CommanderViewProps) {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      const shortcuts = store.getShortcuts();
+      const target = e.target as HTMLElement;
+      const isInputFocused = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA';
+      const maxIndex = visibleAgents.length - 1;
+
       // Escape: collapse or close
-      if (e.key === 'Escape') {
+      const closeShortcut = shortcuts.find(s => s.id === 'commander-close');
+      if (matchesShortcut(e, closeShortcut)) {
         e.preventDefault();
         e.stopPropagation();
         if (expandedAgentId) {
@@ -267,62 +274,76 @@ export function CommanderView({ isOpen, onClose }: CommanderViewProps) {
         return;
       }
 
-      // Vim-style navigation with Alt key
-      if (e.altKey) {
-        const maxIndex = visibleAgents.length - 1;
-
-        switch (e.key.toLowerCase()) {
-          case 'h': // Left
-            e.preventDefault();
-            if (!expandedAgentId) {
-              setFocusedIndex(i => i > 0 ? i - 1 : i);
-            }
-            break;
-          case 'l': // Right
-            e.preventDefault();
-            if (!expandedAgentId) {
-              setFocusedIndex(i => i < maxIndex ? i + 1 : i);
-            }
-            break;
-          case 'k': // Up
-            e.preventDefault();
-            if (!expandedAgentId) {
-              setFocusedIndex(i => i >= GRID_COLS ? i - GRID_COLS : i);
-            }
-            break;
-          case 'j': // Down
-            e.preventDefault();
-            if (!expandedAgentId) {
-              setFocusedIndex(i => i + GRID_COLS <= maxIndex ? i + GRID_COLS : i);
-            }
-            break;
-          case 'o': // Toggle expand
-            e.preventDefault();
-            if (expandedAgentId) {
-              setExpandedAgentId(null);
-            } else if (visibleAgents[focusedIndex]) {
-              setExpandedAgentId(visibleAgents[focusedIndex].id);
-            }
-            break;
-          case 'n': // New agent
-            e.preventDefault();
-            setShowSpawnForm(true);
-            break;
-        }
+      // Vim-style navigation
+      const vimLeftShortcut = shortcuts.find(s => s.id === 'commander-vim-left');
+      if (matchesShortcut(e, vimLeftShortcut) && !expandedAgentId) {
+        e.preventDefault();
+        setFocusedIndex(i => i > 0 ? i - 1 : i);
+        return;
       }
 
-      // Tab key to cycle through area tabs (without Alt)
-      if (e.key === 'Tab' && !e.altKey && !e.ctrlKey && !e.metaKey) {
-        const target = e.target as HTMLElement;
-        if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA') {
+      const vimRightShortcut = shortcuts.find(s => s.id === 'commander-vim-right');
+      if (matchesShortcut(e, vimRightShortcut) && !expandedAgentId) {
+        e.preventDefault();
+        setFocusedIndex(i => i < maxIndex ? i + 1 : i);
+        return;
+      }
+
+      const vimUpShortcut = shortcuts.find(s => s.id === 'commander-vim-up');
+      if (matchesShortcut(e, vimUpShortcut) && !expandedAgentId) {
+        e.preventDefault();
+        setFocusedIndex(i => i >= GRID_COLS ? i - GRID_COLS : i);
+        return;
+      }
+
+      const vimDownShortcut = shortcuts.find(s => s.id === 'commander-vim-down');
+      if (matchesShortcut(e, vimDownShortcut) && !expandedAgentId) {
+        e.preventDefault();
+        setFocusedIndex(i => i + GRID_COLS <= maxIndex ? i + GRID_COLS : i);
+        return;
+      }
+
+      // Toggle expand
+      const expandShortcut = shortcuts.find(s => s.id === 'commander-expand');
+      if (matchesShortcut(e, expandShortcut)) {
+        e.preventDefault();
+        if (expandedAgentId) {
+          setExpandedAgentId(null);
+        } else if (visibleAgents[focusedIndex]) {
+          setExpandedAgentId(visibleAgents[focusedIndex].id);
+        }
+        return;
+      }
+
+      // New agent
+      const newAgentShortcut = shortcuts.find(s => s.id === 'commander-new-agent');
+      if (matchesShortcut(e, newAgentShortcut)) {
+        e.preventDefault();
+        setShowSpawnForm(true);
+        return;
+      }
+
+      // Tab key to cycle through area tabs
+      const nextTabShortcut = shortcuts.find(s => s.id === 'commander-next-tab');
+      const prevTabShortcut = shortcuts.find(s => s.id === 'commander-prev-tab');
+      if (!isInputFocused) {
+        if (matchesShortcut(e, nextTabShortcut)) {
           e.preventDefault();
           e.stopPropagation();
           const currentIndex = tabs.findIndex(t => t.id === activeTab);
-          const nextIndex = e.shiftKey
-            ? (currentIndex - 1 + tabs.length) % tabs.length
-            : (currentIndex + 1) % tabs.length;
+          const nextIndex = (currentIndex + 1) % tabs.length;
           setActiveTab(tabs[nextIndex].id);
           setFocusedIndex(0);
+          return;
+        }
+        if (matchesShortcut(e, prevTabShortcut)) {
+          e.preventDefault();
+          e.stopPropagation();
+          const currentIndex = tabs.findIndex(t => t.id === activeTab);
+          const nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+          setActiveTab(tabs[nextIndex].id);
+          setFocusedIndex(0);
+          return;
         }
       }
     };
@@ -489,6 +510,7 @@ export function CommanderView({ isOpen, onClose }: CommanderViewProps) {
             isOpen={true}
             areaId={fileExplorerAreaId}
             onClose={() => setFileExplorerAreaId(null)}
+            onChangeArea={(newAreaId) => setFileExplorerAreaId(newAreaId)}
           />
         )}
       </div>
@@ -789,6 +811,7 @@ function AgentPanel({ agent, history, outputs, isExpanded, isFocused, advancedVi
     idle: '#4aff9e',
     working: '#4a9eff',
     waiting: '#ff9e4a',
+    waiting_permission: '#ffcc00',
     error: '#ff4a4a',
     offline: '#888888',
   }[agent.status] || '#888888';
