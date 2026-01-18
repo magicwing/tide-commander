@@ -50,7 +50,7 @@
   box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(12px);
   overflow: hidden;
-  transition: transform 0.08s ease-out, opacity 0.08s ease-out;
+  // No transition - show instantly
 }
 
 .guake-header {
@@ -781,7 +781,7 @@
   border-top: none;
   border-radius: 0 0 10px 10px;
   cursor: pointer;
-  transition: top 0.08s ease-out, background $transition-fast, border-color $transition-fast;
+  transition: background $transition-fast, border-color $transition-fast; // No top transition - show instantly
   pointer-events: auto;
   font-family: $font-mono;
   z-index: 201;

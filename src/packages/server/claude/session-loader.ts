@@ -539,7 +539,7 @@ export async function getSessionActivityStatus(
  * that survived a server restart
  */
 export async function isClaudeProcessRunningInCwd(cwd: string): Promise<boolean> {
-  // Only works on Linux/Unix
+  // Only works on Linux/Unix/macOS
   if (process.platform === 'win32') {
     return false;
   }
@@ -563,10 +563,28 @@ export async function isClaudeProcessRunningInCwd(cwd: string): Promise<boolean>
     // Check each PID's working directory
     for (const pid of pids) {
       try {
-        const processCwd = execSync(`readlink /proc/${pid}/cwd`, {
-          encoding: 'utf-8',
-          timeout: 1000,
-        }).trim();
+        let processCwd: string;
+
+        if (process.platform === 'darwin') {
+          // macOS: use lsof to get the current working directory
+          // lsof -a -d cwd filters for only the cwd file descriptor
+          // -Fn outputs just the name field with 'n' prefix
+          const lsofOutput = execSync(`lsof -a -d cwd -p ${pid} -Fn 2>/dev/null | grep '^n'`, {
+            encoding: 'utf-8',
+            timeout: 2000,
+            shell: '/bin/bash',
+          }).trim();
+
+          // lsof output format: "n/path/to/directory"
+          if (!lsofOutput || !lsofOutput.startsWith('n')) continue;
+          processCwd = lsofOutput.substring(1); // Remove the 'n' prefix
+        } else {
+          // Linux: use /proc filesystem
+          processCwd = execSync(`readlink /proc/${pid}/cwd`, {
+            encoding: 'utf-8',
+            timeout: 1000,
+          }).trim();
+        }
 
         // Normalize and compare
         const normalizedProcessCwd = processCwd.replace(/\/+$/, '');

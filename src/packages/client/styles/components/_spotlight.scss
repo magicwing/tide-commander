@@ -1,3 +1,4 @@
+@use 'sass:color';
 @use '../variables' as *;
 
 // Spotlight overlay - higher z-index than other modals
@@ -157,7 +158,7 @@
 
   .spotlight-highlight {
     background: rgba($accent-purple, 0.25);
-    color: lighten($accent-purple, 20%);
+    color: color.adjust($accent-purple, $lightness: 20%);
   }
 }
 
@@ -181,7 +182,7 @@
 
   .spotlight-highlight {
     background: rgba($accent-green, 0.3);
-    color: lighten($accent-green, 15%);
+    color: color.adjust($accent-green, $lightness: 15%);
   }
 }
 
@@ -212,7 +213,7 @@
 
   .spotlight-highlight {
     background: rgba($accent-blue, 0.3);
-    color: lighten($accent-blue, 15%);
+    color: color.adjust($accent-blue, $lightness: 15%);
   }
 }
 
@@ -228,7 +229,7 @@
 
   .spotlight-highlight {
     background: rgba($accent-purple, 0.3);
-    color: lighten($accent-purple, 15%);
+    color: color.adjust($accent-purple, $lightness: 15%);
   }
 }
 
@@ -243,7 +244,7 @@
 
   .spotlight-highlight {
     background: rgba($accent-cyan, 0.3);
-    color: lighten($accent-cyan, 15%);
+    color: color.adjust($accent-cyan, $lightness: 15%);
   }
 
   .spotlight-history-time {

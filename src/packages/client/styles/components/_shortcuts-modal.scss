@@ -1,3 +1,4 @@
+@use 'sass:color';
 @use '../variables' as *;
 
 // Floating button for keyboard shortcuts - positioned after supervisor button
@@ -22,7 +23,7 @@
   &:hover {
     border-color: $dracula-pink;
     color: $dracula-pink;
-    background: linear-gradient(180deg, lighten($dracula-current, 5%) 0%, $dracula-current 100%);
+    background: linear-gradient(180deg, color.adjust($dracula-current, $lightness: 5%) 0%, $dracula-current 100%);
   }
 }
 
