@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useStore, ToolExecution, FileChange } from '../store';
+import React, { useState, useMemo } from 'react';
+import { useToolExecutions, useFileChanges, ToolExecution, FileChange } from '../store';
 import { FileViewerModal } from './FileViewerModal';
 
 interface ToolHistoryProps {
@@ -10,7 +10,8 @@ const TOOLS_COLLAPSED_KEY = 'tide-tools-collapsed';
 const FILES_COLLAPSED_KEY = 'tide-files-collapsed';
 
 export function ToolHistory({ agentIds }: ToolHistoryProps) {
-  const state = useStore();
+  const allToolExecutions = useToolExecutions();
+  const allFileChanges = useFileChanges();
   const [selectedFile, setSelectedFile] = useState<{ path: string; action: FileChange['action'] } | null>(null);
   const [expandedToolIndex, setExpandedToolIndex] = useState<number | null>(null);
   const [toolsCollapsed, setToolsCollapsed] = useState(() => {
@@ -32,10 +33,16 @@ export function ToolHistory({ agentIds }: ToolHistoryProps) {
     localStorage.setItem(FILES_COLLAPSED_KEY, String(newValue));
   };
 
-  // Filter by selected agents
-  const agentIdSet = new Set(agentIds);
-  const toolExecutions = state.toolExecutions.filter(t => agentIdSet.has(t.agentId));
-  const fileChanges = state.fileChanges.filter(f => agentIdSet.has(f.agentId));
+  // Filter by selected agents - memoized
+  const agentIdSet = useMemo(() => new Set(agentIds), [agentIds]);
+  const toolExecutions = useMemo(
+    () => allToolExecutions.filter(t => agentIdSet.has(t.agentId)),
+    [allToolExecutions, agentIdSet]
+  );
+  const fileChanges = useMemo(
+    () => allFileChanges.filter(f => agentIdSet.has(f.agentId)),
+    [allFileChanges, agentIdSet]
+  );
 
   // Show agent names when multiple agents selected
   const showAgentName = agentIds.length > 1;

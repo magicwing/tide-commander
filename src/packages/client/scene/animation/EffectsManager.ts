@@ -50,6 +50,14 @@ interface DelegationEffect {
 }
 
 /**
+ * Pooled sprite for reuse
+ */
+interface PooledSprite {
+  sprite: THREE.Sprite;
+  inUse: boolean;
+}
+
+/**
  * Tool icons for common tools
  */
 const TOOL_ICONS: Record<string, string> = {
@@ -67,6 +75,7 @@ const TOOL_ICONS: Record<string, string> = {
 
 /**
  * Manages visual effects like move order indicators.
+ * Optimized with geometry/material reuse and object pooling.
  */
 export class EffectsManager {
   private scene: THREE.Scene;
@@ -77,12 +86,248 @@ export class EffectsManager {
   private delegationEffects: DelegationEffect[] = [];
   private agentMeshes: Map<string, THREE.Group> = new Map();
 
-  // Cached texture for delegation paper effect (created once, reused)
+  // ============================================
+  // CACHED GEOMETRIES (created once, reused)
+  // ============================================
+  private ringGeometry: THREE.RingGeometry | null = null;
+  private pulseGeometry: THREE.RingGeometry | null = null;
+  private chevronGeometry: THREE.ShapeGeometry | null = null;
+
+  // ============================================
+  // CACHED TEXTURES (created once, reused)
+  // ============================================
   private delegationPaperTexture: THREE.CanvasTexture | null = null;
+  private sleepingBubbleTexture: THREE.CanvasTexture | null = null;
+  private waitingPermissionTexture: THREE.CanvasTexture | null = null;
+
+  // ============================================
+  // OBJECT POOLS (reuse sprites/materials)
+  // ============================================
+  private delegationSpritePool: PooledSprite[] = [];
+  private moveOrderGroupPool: THREE.Group[] = [];
+  private static readonly POOL_SIZE = 10;
+
+  // Track if scene needs redraw (dirty flag)
+  private _needsUpdate = false;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
+    this.initializeCachedResources();
+  }
+
+  /**
+   * Check if effects need to be rendered this frame.
+   */
+  get needsUpdate(): boolean {
+    return this._needsUpdate ||
+      this.moveOrderEffects.length > 0 ||
+      this.speechBubbles.length > 0 ||
+      this.sleepingEffects.length > 0 ||
+      this.waitingPermissionEffects.length > 0 ||
+      this.delegationEffects.length > 0;
+  }
+
+  /**
+   * Mark effects as needing update.
+   */
+  markDirty(): void {
+    this._needsUpdate = true;
+  }
+
+  /**
+   * Clear dirty flag after update.
+   */
+  clearDirty(): void {
+    this._needsUpdate = false;
+  }
+
+  /**
+   * Initialize all cached geometries and textures once.
+   */
+  private initializeCachedResources(): void {
+    // Create shared geometries
+    this.ringGeometry = new THREE.RingGeometry(0.3, 0.4, 32);
+    this.pulseGeometry = new THREE.RingGeometry(0.1, 0.2, 32);
+
+    // Chevron shape geometry
+    const chevronShape = new THREE.Shape();
+    chevronShape.moveTo(0, 0.15);
+    chevronShape.lineTo(0.12, 0.35);
+    chevronShape.lineTo(0.08, 0.35);
+    chevronShape.lineTo(0, 0.2);
+    chevronShape.lineTo(-0.08, 0.35);
+    chevronShape.lineTo(-0.12, 0.35);
+    chevronShape.closePath();
+    this.chevronGeometry = new THREE.ShapeGeometry(chevronShape);
+
+    // Create cached textures
     this.createDelegationPaperTexture();
+    this.createSleepingBubbleTexture();
+    this.createWaitingPermissionTexture();
+
+    // Pre-populate object pools
+    this.initializePools();
+  }
+
+  /**
+   * Initialize object pools for frequently created/destroyed objects.
+   */
+  private initializePools(): void {
+    // Pre-create delegation sprites
+    for (let i = 0; i < EffectsManager.POOL_SIZE; i++) {
+      if (this.delegationPaperTexture) {
+        const material = new THREE.SpriteMaterial({
+          map: this.delegationPaperTexture,
+          transparent: true,
+          opacity: 0,
+          depthTest: false,
+        });
+        const sprite = new THREE.Sprite(material);
+        sprite.scale.set(0.3, 0.3, 1);
+        sprite.visible = false;
+        this.delegationSpritePool.push({ sprite, inUse: false });
+      }
+    }
+
+    // Pre-create move order groups
+    for (let i = 0; i < EffectsManager.POOL_SIZE; i++) {
+      const group = this.createMoveOrderGroup();
+      group.visible = false;
+      this.moveOrderGroupPool.push(group);
+    }
+  }
+
+  /**
+   * Create a reusable move order group with shared geometries.
+   */
+  private createMoveOrderGroup(): THREE.Group {
+    const group = new THREE.Group();
+
+    // Ring (using shared geometry)
+    const ringMaterial = new THREE.MeshBasicMaterial({
+      color: 0x4aff9e,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.8,
+    });
+    const ring = new THREE.Mesh(this.ringGeometry!, ringMaterial);
+    ring.rotation.x = -Math.PI / 2;
+    ring.name = 'ring';
+    group.add(ring);
+
+    // Pulse ring (using shared geometry)
+    const pulseMaterial = new THREE.MeshBasicMaterial({
+      color: 0x4aff9e,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.6,
+    });
+    const pulse = new THREE.Mesh(this.pulseGeometry!, pulseMaterial);
+    pulse.rotation.x = -Math.PI / 2;
+    pulse.name = 'pulse';
+    group.add(pulse);
+
+    // Chevrons (using shared geometry)
+    for (let i = 0; i < 3; i++) {
+      const chevronMaterial = new THREE.MeshBasicMaterial({
+        color: 0x4aff9e,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.9,
+      });
+      const chevron = new THREE.Mesh(this.chevronGeometry!, chevronMaterial);
+      chevron.rotation.x = -Math.PI / 2;
+      chevron.position.y = 0.5 + i * 0.25;
+      chevron.name = `chevron${i}`;
+      group.add(chevron);
+    }
+
+    return group;
+  }
+
+  /**
+   * Get a sprite from the delegation pool or create new if pool exhausted.
+   */
+  private getDelegationSprite(): THREE.Sprite {
+    // Find available sprite in pool
+    for (const pooled of this.delegationSpritePool) {
+      if (!pooled.inUse) {
+        pooled.inUse = true;
+        pooled.sprite.visible = true;
+        pooled.sprite.material.opacity = 1;
+        return pooled.sprite;
+      }
+    }
+
+    // Pool exhausted, create new (will be cleaned up, not returned to pool)
+    const material = new THREE.SpriteMaterial({
+      map: this.delegationPaperTexture,
+      transparent: true,
+      opacity: 1,
+      depthTest: false,
+    });
+    const sprite = new THREE.Sprite(material);
+    sprite.scale.set(0.3, 0.3, 1);
+    return sprite;
+  }
+
+  /**
+   * Return a sprite to the delegation pool.
+   */
+  private returnDelegationSprite(sprite: THREE.Sprite): void {
+    for (const pooled of this.delegationSpritePool) {
+      if (pooled.sprite === sprite) {
+        pooled.inUse = false;
+        pooled.sprite.visible = false;
+        this.scene.remove(sprite);
+        return;
+      }
+    }
+    // Not from pool, dispose it
+    this.scene.remove(sprite);
+    sprite.material.dispose();
+  }
+
+  /**
+   * Get a move order group from pool or create new.
+   */
+  private getMoveOrderGroup(): THREE.Group {
+    for (const group of this.moveOrderGroupPool) {
+      if (!group.visible) {
+        group.visible = true;
+        // Reset materials
+        group.traverse((child) => {
+          if (child instanceof THREE.Mesh) {
+            const mat = child.material as THREE.MeshBasicMaterial;
+            mat.opacity = child.name === 'ring' ? 0.8 : child.name === 'pulse' ? 0.6 : 0.9;
+          }
+        });
+        return group;
+      }
+    }
+
+    // Pool exhausted, create new
+    return this.createMoveOrderGroup();
+  }
+
+  /**
+   * Return a move order group to pool.
+   */
+  private returnMoveOrderGroup(group: THREE.Group): void {
+    const pooled = this.moveOrderGroupPool.includes(group);
+    if (pooled) {
+      group.visible = false;
+      this.scene.remove(group);
+    } else {
+      // Not from pool, dispose it
+      this.scene.remove(group);
+      group.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          // Don't dispose shared geometry
+          (child.material as THREE.Material).dispose();
+        }
+      });
+    }
   }
 
   /**
@@ -146,6 +391,100 @@ export class EffectsManager {
   }
 
   /**
+   * Create and cache the sleeping bubble texture (called once).
+   */
+  private createSleepingBubbleTexture(): void {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d')!;
+    canvas.width = 128;
+    canvas.height = 128;
+
+    // Draw thought bubble background - compact
+    ctx.fillStyle = 'rgba(40, 42, 54, 0.95)';
+    ctx.strokeStyle = '#bd93f9'; // Dracula purple
+    ctx.lineWidth = 2;
+
+    // Main bubble - centered, smaller
+    const bubbleX = 64, bubbleY = 50, bubbleR = 40;
+    ctx.beginPath();
+    ctx.arc(bubbleX, bubbleY, bubbleR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Small connector bubbles - scaled down
+    ctx.beginPath();
+    ctx.arc(30, 95, 10, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(18, 115, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Draw ZZZ text - smaller
+    ctx.fillStyle = '#8be9fd'; // Dracula cyan
+    ctx.font = 'bold 28px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = '#8be9fd';
+    ctx.shadowBlur = 4;
+    ctx.fillText('ZZZ', bubbleX, bubbleY);
+
+    // Create and cache texture
+    this.sleepingBubbleTexture = new THREE.CanvasTexture(canvas);
+    this.sleepingBubbleTexture.minFilter = THREE.LinearFilter;
+    this.sleepingBubbleTexture.magFilter = THREE.LinearFilter;
+  }
+
+  /**
+   * Create and cache the waiting permission texture (called once).
+   */
+  private createWaitingPermissionTexture(): void {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d')!;
+    canvas.width = 128;
+    canvas.height = 128;
+
+    // Draw thought bubble background - compact
+    ctx.fillStyle = 'rgba(40, 42, 54, 0.95)';
+    ctx.strokeStyle = '#ffcc00'; // Yellow/gold for permission
+    ctx.lineWidth = 2;
+
+    // Main bubble - centered, smaller
+    const bubbleX = 64, bubbleY = 50, bubbleR = 40;
+    ctx.beginPath();
+    ctx.arc(bubbleX, bubbleY, bubbleR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Small connector bubbles - scaled down
+    ctx.beginPath();
+    ctx.arc(30, 95, 10, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(18, 115, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Draw lock icon (🔒) - smaller
+    ctx.fillStyle = '#ffcc00'; // Yellow/gold
+    ctx.font = 'bold 32px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = '#ffcc00';
+    ctx.shadowBlur = 6;
+    ctx.fillText('🔒', bubbleX, bubbleY);
+
+    // Create and cache texture
+    this.waitingPermissionTexture = new THREE.CanvasTexture(canvas);
+    this.waitingPermissionTexture.minFilter = THREE.LinearFilter;
+    this.waitingPermissionTexture.magFilter = THREE.LinearFilter;
+  }
+
+  /**
    * Set reference to agent meshes for tracking positions.
    */
   setAgentMeshes(meshes: Map<string, { group: THREE.Group }>): void {
@@ -187,59 +526,17 @@ export class EffectsManager {
 
   /**
    * Create a sleeping bubble effect above an agent.
+   * Optimized: uses cached texture instead of creating canvas per agent.
    */
   private createSleepingEffect(agentId: string): void {
     const agentGroup = this.agentMeshes.get(agentId);
-    if (!agentGroup) return;
+    if (!agentGroup || !this.sleepingBubbleTexture) return;
 
     const sprites: THREE.Sprite[] = [];
 
-    // Create compact sleep bubble
-    const bubbleCanvas = document.createElement('canvas');
-    const bubbleCtx = bubbleCanvas.getContext('2d')!;
-    bubbleCanvas.width = 128;
-    bubbleCanvas.height = 128;
-
-    // Draw thought bubble background - compact
-    bubbleCtx.fillStyle = 'rgba(40, 42, 54, 0.95)';
-    bubbleCtx.strokeStyle = '#bd93f9'; // Dracula purple
-    bubbleCtx.lineWidth = 2;
-
-    // Main bubble - centered, smaller
-    const bubbleX = 64, bubbleY = 50, bubbleR = 40;
-    bubbleCtx.beginPath();
-    bubbleCtx.arc(bubbleX, bubbleY, bubbleR, 0, Math.PI * 2);
-    bubbleCtx.fill();
-    bubbleCtx.stroke();
-
-    // Small connector bubbles - scaled down
-    bubbleCtx.beginPath();
-    bubbleCtx.arc(30, 95, 10, 0, Math.PI * 2);
-    bubbleCtx.fill();
-    bubbleCtx.stroke();
-
-    bubbleCtx.beginPath();
-    bubbleCtx.arc(18, 115, 6, 0, Math.PI * 2);
-    bubbleCtx.fill();
-    bubbleCtx.stroke();
-
-    // Draw ZZZ text - smaller
-    bubbleCtx.fillStyle = '#8be9fd'; // Dracula cyan
-    bubbleCtx.font = 'bold 28px Arial';
-    bubbleCtx.textAlign = 'center';
-    bubbleCtx.textBaseline = 'middle';
-    bubbleCtx.shadowColor = '#8be9fd';
-    bubbleCtx.shadowBlur = 4;
-    bubbleCtx.fillText('ZZZ', bubbleX, bubbleY);
-
-    // Create bubble sprite with high quality filtering
-    const bubbleTexture = new THREE.CanvasTexture(bubbleCanvas);
-    bubbleTexture.minFilter = THREE.LinearFilter;
-    bubbleTexture.magFilter = THREE.LinearFilter;
-    bubbleTexture.needsUpdate = true;
-
+    // Use cached texture - only create new material
     const bubbleMaterial = new THREE.SpriteMaterial({
-      map: bubbleTexture,
+      map: this.sleepingBubbleTexture,
       transparent: true,
       opacity: 0.95,
       depthTest: false,
@@ -263,10 +560,13 @@ export class EffectsManager {
       agentId,
       startTime: performance.now(),
     });
+
+    this.markDirty();
   }
 
   /**
    * Remove sleeping effect for an agent.
+   * Note: Does not dispose shared texture, only material.
    */
   private removeSleepingEffect(agentId: string): void {
     const index = this.sleepingEffects.findIndex(e => e.agentId === agentId);
@@ -274,68 +574,27 @@ export class EffectsManager {
       const effect = this.sleepingEffects[index];
       for (const sprite of effect.sprites) {
         this.scene.remove(sprite);
-        sprite.material.map?.dispose();
+        // Don't dispose the shared texture, only the material
         sprite.material.dispose();
       }
       this.sleepingEffects.splice(index, 1);
+      this.markDirty();
     }
   }
 
   /**
    * Create a waiting permission bubble effect above an agent.
+   * Optimized: uses cached texture instead of creating canvas per agent.
    */
   private createWaitingPermissionEffect(agentId: string): void {
     const agentGroup = this.agentMeshes.get(agentId);
-    if (!agentGroup) return;
+    if (!agentGroup || !this.waitingPermissionTexture) return;
 
     const sprites: THREE.Sprite[] = [];
 
-    // Create permission bubble with lock icon
-    const bubbleCanvas = document.createElement('canvas');
-    const bubbleCtx = bubbleCanvas.getContext('2d')!;
-    bubbleCanvas.width = 128;
-    bubbleCanvas.height = 128;
-
-    // Draw thought bubble background - compact
-    bubbleCtx.fillStyle = 'rgba(40, 42, 54, 0.95)';
-    bubbleCtx.strokeStyle = '#ffcc00'; // Yellow/gold for permission
-    bubbleCtx.lineWidth = 2;
-
-    // Main bubble - centered, smaller
-    const bubbleX = 64, bubbleY = 50, bubbleR = 40;
-    bubbleCtx.beginPath();
-    bubbleCtx.arc(bubbleX, bubbleY, bubbleR, 0, Math.PI * 2);
-    bubbleCtx.fill();
-    bubbleCtx.stroke();
-
-    // Small connector bubbles - scaled down
-    bubbleCtx.beginPath();
-    bubbleCtx.arc(30, 95, 10, 0, Math.PI * 2);
-    bubbleCtx.fill();
-    bubbleCtx.stroke();
-
-    bubbleCtx.beginPath();
-    bubbleCtx.arc(18, 115, 6, 0, Math.PI * 2);
-    bubbleCtx.fill();
-    bubbleCtx.stroke();
-
-    // Draw lock icon (🔒) - smaller
-    bubbleCtx.fillStyle = '#ffcc00'; // Yellow/gold
-    bubbleCtx.font = 'bold 32px Arial';
-    bubbleCtx.textAlign = 'center';
-    bubbleCtx.textBaseline = 'middle';
-    bubbleCtx.shadowColor = '#ffcc00';
-    bubbleCtx.shadowBlur = 6;
-    bubbleCtx.fillText('🔒', bubbleX, bubbleY);
-
-    // Create bubble sprite with high quality filtering
-    const bubbleTexture = new THREE.CanvasTexture(bubbleCanvas);
-    bubbleTexture.minFilter = THREE.LinearFilter;
-    bubbleTexture.magFilter = THREE.LinearFilter;
-    bubbleTexture.needsUpdate = true;
-
+    // Use cached texture - only create new material
     const bubbleMaterial = new THREE.SpriteMaterial({
-      map: bubbleTexture,
+      map: this.waitingPermissionTexture,
       transparent: true,
       opacity: 0.95,
       depthTest: false,
@@ -359,10 +618,13 @@ export class EffectsManager {
       agentId,
       startTime: performance.now(),
     });
+
+    this.markDirty();
   }
 
   /**
    * Remove waiting permission effect for an agent.
+   * Note: Does not dispose shared texture, only material.
    */
   private removeWaitingPermissionEffect(agentId: string): void {
     const index = this.waitingPermissionEffects.findIndex(e => e.agentId === agentId);
@@ -370,15 +632,17 @@ export class EffectsManager {
       const effect = this.waitingPermissionEffects[index];
       for (const sprite of effect.sprites) {
         this.scene.remove(sprite);
-        sprite.material.map?.dispose();
+        // Don't dispose the shared texture, only the material
         sprite.material.dispose();
       }
       this.waitingPermissionEffects.splice(index, 1);
+      this.markDirty();
     }
   }
 
   /**
    * Create a delegation effect - paper/document flying from boss to subordinate.
+   * Optimized: uses sprite pool to avoid allocation.
    */
   createDelegationEffect(bossId: string, subordinateId: string): void {
     const bossGroup = this.agentMeshes.get(bossId);
@@ -389,16 +653,8 @@ export class EffectsManager {
       return;
     }
 
-    // Use cached texture (no canvas creation per effect)
-    const material = new THREE.SpriteMaterial({
-      map: this.delegationPaperTexture,
-      transparent: true,
-      opacity: 1.0,
-      depthTest: false,
-    });
-
-    const sprite = new THREE.Sprite(material);
-    sprite.scale.set(0.3, 0.3, 1);
+    // Get sprite from pool (or create new if exhausted)
+    const sprite = this.getDelegationSprite();
 
     // Start position (above boss)
     const startPos = new THREE.Vector3(
@@ -424,6 +680,8 @@ export class EffectsManager {
       startTime: performance.now(),
       duration: 800, // Faster: 0.8 seconds for the flight
     });
+
+    this.markDirty();
   }
 
   /**
@@ -592,63 +850,28 @@ export class EffectsManager {
 
   /**
    * Create a move order effect at a position.
+   * Optimized: uses object pool and shared geometries.
    */
   createMoveOrderEffect(position: THREE.Vector3): void {
-    const group = new THREE.Group();
+    // Get group from pool (or create new if exhausted)
+    const group = this.getMoveOrderGroup();
     group.position.copy(position);
     group.position.y = 0.05;
 
-    // Ground ring
-    const ringGeometry = new THREE.RingGeometry(0.3, 0.4, 32);
-    const ringMaterial = new THREE.MeshBasicMaterial({
-      color: 0x4aff9e,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.8,
-    });
-    const ring = new THREE.Mesh(ringGeometry, ringMaterial);
-    ring.rotation.x = -Math.PI / 2;
-    ring.name = 'ring';
-    group.add(ring);
-
-    // Pulse ring
-    const pulseGeometry = new THREE.RingGeometry(0.1, 0.2, 32);
-    const pulseMaterial = new THREE.MeshBasicMaterial({
-      color: 0x4aff9e,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.6,
-    });
-    const pulse = new THREE.Mesh(pulseGeometry, pulseMaterial);
-    pulse.rotation.x = -Math.PI / 2;
-    pulse.name = 'pulse';
-    group.add(pulse);
-
-    // Chevrons
-    const chevronShape = new THREE.Shape();
-    chevronShape.moveTo(0, 0.15);
-    chevronShape.lineTo(0.12, 0.35);
-    chevronShape.lineTo(0.08, 0.35);
-    chevronShape.lineTo(0, 0.2);
-    chevronShape.lineTo(-0.08, 0.35);
-    chevronShape.lineTo(-0.12, 0.35);
-    chevronShape.closePath();
-
-    const chevronGeometry = new THREE.ShapeGeometry(chevronShape);
-
+    // Reset chevron positions
     for (let i = 0; i < 3; i++) {
-      const chevronMaterial = new THREE.MeshBasicMaterial({
-        color: 0x4aff9e,
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.9,
-      });
-      const chevron = new THREE.Mesh(chevronGeometry, chevronMaterial);
-      chevron.rotation.x = -Math.PI / 2;
-      chevron.position.y = 0.5 + i * 0.25;
-      chevron.name = `chevron${i}`;
-      group.add(chevron);
+      const chevron = group.getObjectByName(`chevron${i}`) as THREE.Mesh;
+      if (chevron) {
+        chevron.position.y = 0.5 + i * 0.25;
+      }
     }
+
+    // Reset ring scale
+    const ring = group.getObjectByName('ring') as THREE.Mesh;
+    if (ring) ring.scale.setScalar(1);
+
+    const pulse = group.getObjectByName('pulse') as THREE.Mesh;
+    if (pulse) pulse.scale.setScalar(1);
 
     this.scene.add(group);
     this.moveOrderEffects.push({
@@ -656,6 +879,8 @@ export class EffectsManager {
       startTime: performance.now(),
       duration: 800,
     });
+
+    this.markDirty();
   }
 
   // Reference to camera for zoom-based scaling
@@ -828,18 +1053,18 @@ export class EffectsManager {
       }
     }
 
-    // Remove completed effects (don't dispose cached texture)
+    // Return completed effects to pool
     for (let i = toRemove.length - 1; i >= 0; i--) {
       const idx = toRemove[i];
       const effect = this.delegationEffects[idx];
-      this.scene.remove(effect.sprite);
-      effect.sprite.material.dispose();
+      this.returnDelegationSprite(effect.sprite);
       this.delegationEffects.splice(idx, 1);
     }
   }
 
   /**
    * Update move order effects.
+   * Optimized: returns groups to pool instead of disposing.
    */
   private updateMoveOrderEffects(now: number): void {
     const toRemove: number[] = [];
@@ -878,10 +1103,10 @@ export class EffectsManager {
       }
     }
 
-    // Remove completed effects
+    // Return completed effects to pool
     for (let i = toRemove.length - 1; i >= 0; i--) {
       const idx = toRemove[i];
-      this.disposeEffect(this.moveOrderEffects[idx]);
+      this.returnMoveOrderGroup(this.moveOrderEffects[idx].group);
       this.moveOrderEffects.splice(idx, 1);
     }
   }
@@ -937,13 +1162,13 @@ export class EffectsManager {
   }
 
   /**
-   * Dispose of an effect and its resources.
+   * Dispose of an effect and its resources (for non-pooled effects).
    */
   private disposeEffect(effect: MoveOrderEffect): void {
     this.scene.remove(effect.group);
     effect.group.traverse((child) => {
       if (child instanceof THREE.Mesh) {
-        child.geometry.dispose();
+        // Don't dispose shared geometry
         (child.material as THREE.Material).dispose();
       }
     });
@@ -967,39 +1192,89 @@ export class EffectsManager {
   }
 
   /**
-   * Clear all effects.
+   * Clear all active effects (keeps pools and cached resources).
    */
   clear(): void {
+    // Return move order groups to pool
     for (const effect of this.moveOrderEffects) {
-      this.disposeEffect(effect);
+      this.returnMoveOrderGroup(effect.group);
     }
     this.moveOrderEffects = [];
 
-    // Clear sleeping effects
+    // Clear sleeping effects (don't dispose shared texture)
     for (const effect of this.sleepingEffects) {
       for (const sprite of effect.sprites) {
         this.scene.remove(sprite);
-        sprite.material.map?.dispose();
         sprite.material.dispose();
       }
     }
     this.sleepingEffects = [];
 
-    // Clear waiting permission effects
+    // Clear waiting permission effects (don't dispose shared texture)
     for (const effect of this.waitingPermissionEffects) {
       for (const sprite of effect.sprites) {
         this.scene.remove(sprite);
-        sprite.material.map?.dispose();
         sprite.material.dispose();
       }
     }
     this.waitingPermissionEffects = [];
 
-    // Clear delegation effects (don't dispose the cached texture)
+    // Return delegation sprites to pool
     for (const effect of this.delegationEffects) {
-      this.scene.remove(effect.sprite);
-      effect.sprite.material.dispose(); // Only dispose material, not texture
+      this.returnDelegationSprite(effect.sprite);
     }
     this.delegationEffects = [];
+
+    // Clear speech bubbles
+    for (const bubble of this.speechBubbles) {
+      this.scene.remove(bubble.sprite);
+      bubble.sprite.material.map?.dispose();
+      bubble.sprite.material.dispose();
+    }
+    this.speechBubbles = [];
+  }
+
+  /**
+   * Fully dispose all resources including pools and cached textures.
+   * Call this when destroying the EffectsManager.
+   */
+  dispose(): void {
+    // Clear all active effects first
+    this.clear();
+
+    // Dispose cached geometries
+    this.ringGeometry?.dispose();
+    this.pulseGeometry?.dispose();
+    this.chevronGeometry?.dispose();
+    this.ringGeometry = null;
+    this.pulseGeometry = null;
+    this.chevronGeometry = null;
+
+    // Dispose cached textures
+    this.delegationPaperTexture?.dispose();
+    this.sleepingBubbleTexture?.dispose();
+    this.waitingPermissionTexture?.dispose();
+    this.delegationPaperTexture = null;
+    this.sleepingBubbleTexture = null;
+    this.waitingPermissionTexture = null;
+
+    // Dispose delegation sprite pool
+    for (const pooled of this.delegationSpritePool) {
+      pooled.sprite.material.dispose();
+    }
+    this.delegationSpritePool = [];
+
+    // Dispose move order group pool
+    for (const group of this.moveOrderGroupPool) {
+      group.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          (child.material as THREE.Material).dispose();
+        }
+      });
+    }
+    this.moveOrderGroupPool = [];
+
+    // Clear agent meshes reference
+    this.agentMeshes.clear();
   }
 }

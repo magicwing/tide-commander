@@ -1118,7 +1118,8 @@ export class SceneManager {
     this.inputHandler.dispose();
     this.drawingManager.dispose();
     this.buildingManager.dispose();
-    this.effectsManager.clear();
+    // Use dispose() instead of clear() to fully clean up cached resources
+    this.effectsManager.dispose();
     this.renderer.dispose();
     this.controls.dispose();
   }

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { store, useStore } from '../store';
+import React, { useState, useEffect, useMemo } from 'react';
+import { store, useAgents, useAgent } from '../store';
 import type { Agent } from '../../shared/types';
 import { AGENT_CLASSES } from '../../shared/types';
 
@@ -10,11 +10,10 @@ interface SubordinateAssignmentModalProps {
 }
 
 export function SubordinateAssignmentModal({ isOpen, bossId, onClose }: SubordinateAssignmentModalProps) {
-  const { agents } = useStore();
+  const agents = useAgents();
+  const boss = useAgent(bossId);
   const [selectedSubordinates, setSelectedSubordinates] = useState<Set<string>>(new Set());
   const [isSaving, setIsSaving] = useState(false);
-
-  const boss = agents.get(bossId);
 
   // Get available agents (non-boss, and either unassigned or assigned to this boss)
   const availableAgents = Array.from(agents.values()).filter(

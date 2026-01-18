@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ShortcutConfig, ShortcutModifiers, formatShortcut, findConflictingShortcuts } from '../store/shortcuts';
-import { store, useStore } from '../store';
+import { store, useShortcuts } from '../store';
 
 interface KeyCaptureInputProps {
   shortcut: ShortcutConfig;
@@ -8,15 +8,18 @@ interface KeyCaptureInputProps {
 }
 
 export function KeyCaptureInput({ shortcut, onUpdate }: KeyCaptureInputProps) {
-  const state = useStore();
+  const shortcuts = useShortcuts();
   const [isCapturing, setIsCapturing] = useState(false);
   const [pendingKey, setPendingKey] = useState<{ key: string; modifiers: ShortcutModifiers } | null>(null);
   const inputRef = useRef<HTMLButtonElement>(null);
 
   // Check for conflicts with the current or pending shortcut
-  const conflicts = pendingKey
-    ? findConflictingShortcuts(state.shortcuts, pendingKey, shortcut.id, shortcut.context)
-    : [];
+  const conflicts = useMemo(() =>
+    pendingKey
+      ? findConflictingShortcuts(shortcuts, pendingKey, shortcut.id, shortcut.context)
+      : [],
+    [pendingKey, shortcuts, shortcut.id, shortcut.context]
+  );
 
   // Handle key capture
   useEffect(() => {

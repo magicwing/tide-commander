@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo, memo } from 'react';
 import ReactMarkdown, { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useStore, store, ClaudeOutput } from '../store';
@@ -432,6 +432,8 @@ export function ClaudeOutputPanel() {
   const resizeStartYRef = useRef(0);
   const resizeStartHeightRef = useRef(0);
   const terminalRef = useRef<HTMLDivElement>(null);
+  const terminalHeightRef = useRef(terminalHeight); // Track height in ref for event handlers
+  terminalHeightRef.current = terminalHeight; // Keep ref in sync
 
   // Get selected agent's outputs - only show terminal when exactly one agent is selected
   const selectedAgentIds = Array.from(state.selectedAgentIds);
@@ -627,6 +629,20 @@ export function ClaudeOutputPanel() {
   // Use store's terminal state
   const isOpen = state.terminalOpen && selectedAgent !== null;
 
+  // Memoized callbacks to prevent re-renders of child components
+  const handleImageClick = useCallback((url: string, name: string) => {
+    setImageModal({ url, name });
+  }, []);
+
+  const handleFileClick = useCallback((path: string) => {
+    store.setFileViewerPath(path);
+  }, []);
+
+  // Memoized sorted agents list for the agent links bar
+  const sortedAgents = useMemo(() => {
+    return Array.from(state.agents.values()).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  }, [state.agents]);
+
   // Handle resize drag
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -656,8 +672,8 @@ export function ClaudeOutputPanel() {
         isResizingRef.current = false;
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
-        // Save to localStorage when done resizing
-        localStorage.setItem(TERMINAL_HEIGHT_KEY, String(terminalHeight));
+        // Save to localStorage when done resizing - use ref for current value
+        localStorage.setItem(TERMINAL_HEIGHT_KEY, String(terminalHeightRef.current));
       }
     };
 
@@ -668,7 +684,7 @@ export function ClaudeOutputPanel() {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [terminalHeight]);
+  }, []); // No dependencies - listeners are registered once
 
   // Focus input when terminal opens or switches to textarea
   useEffect(() => {
@@ -899,18 +915,20 @@ export function ClaudeOutputPanel() {
   }, [isOpen, searchMode, imageModal]);
 
   // Auto-scroll to bottom on new output (but not if user is scrolled up)
+  // Uses requestAnimationFrame to batch with browser's paint cycle
   useEffect(() => {
     // Skip auto-scroll if user has scrolled up intentionally
     if (isUserScrolledUpRef.current) return;
 
-    // Use setTimeout to ensure DOM has fully updated after React render
-    const timeoutId = setTimeout(() => {
+    let rafId: number;
+    // Use requestAnimationFrame for better performance - batches with browser paint
+    rafId = requestAnimationFrame(() => {
       if (outputRef.current && !isUserScrolledUpRef.current) {
         outputRef.current.scrollTop = outputRef.current.scrollHeight;
       }
-    }, 50);
+    });
 
-    return () => clearTimeout(timeoutId);
+    return () => cancelAnimationFrame(rafId);
   }, [outputs.length]);
 
   // Scroll to bottom when switching agents (reset scroll position for new agent)
@@ -920,13 +938,14 @@ export function ClaudeOutputPanel() {
     // Reset scroll state when switching agents
     isUserScrolledUpRef.current = false;
 
-    const timeoutId = setTimeout(() => {
+    let rafId: number;
+    rafId = requestAnimationFrame(() => {
       if (outputRef.current) {
         outputRef.current.scrollTop = outputRef.current.scrollHeight;
       }
-    }, 100);
+    });
 
-    return () => clearTimeout(timeoutId);
+    return () => cancelAnimationFrame(rafId);
   }, [selectedAgentId, loadingHistory]);
 
   // Keyboard shortcut to toggle (backtick key like Guake)
@@ -1200,11 +1219,8 @@ export function ClaudeOutputPanel() {
                     key={`h-${index}`}
                     message={msg}
                     simpleView={viewMode !== 'advanced'}
-                    onImageClick={(url, name) => setImageModal({ url, name })}
-                    onFileClick={(path) => {
-                      // Open file in FileExplorerPanel by setting the path
-                      store.setFileViewerPath(path);
-                    }}
+                    onImageClick={handleImageClick}
+                    onFileClick={handleFileClick}
                   />
                 ))}
               {outputs
@@ -1220,8 +1236,8 @@ export function ClaudeOutputPanel() {
                     key={`o-${index}`}
                     output={output}
                     agentId={selectedAgentId}
-                    onImageClick={(url, name) => setImageModal({ url, name })}
-                    onFileClick={(path) => store.setFileViewerPath(path)}
+                    onImageClick={handleImageClick}
+                    onFileClick={handleFileClick}
                   />
                 ))}
               {selectedAgent.status === 'working' && (
@@ -1336,9 +1352,7 @@ export function ClaudeOutputPanel() {
         </div>
         {/* Agent Links Indicators - at the bottom */}
         <div className="guake-agent-links">
-          {Array.from(state.agents.values())
-            .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
-            .map((agent) => (
+          {sortedAgents.map((agent) => (
               <GuakeAgentLink
                 key={agent.id}
                 agent={agent}
@@ -1811,7 +1825,7 @@ function renderReadToolInput(content: string, onFileClick?: (path: string) => vo
   }
 }
 
-function HistoryLine({ message, highlight, simpleView, onImageClick, onFileClick }: HistoryLineProps) {
+const HistoryLine = memo(function HistoryLine({ message, highlight, simpleView, onImageClick, onFileClick }: HistoryLineProps) {
   const state = useStore();
   const hideCost = state.settings.hideCost;
   const { type, content: rawContent, toolName } = message;
@@ -1957,7 +1971,7 @@ function HistoryLine({ message, highlight, simpleView, onImageClick, onFileClick
       </span>
     </div>
   );
-}
+});
 
 interface OutputLineProps {
   output: ClaudeOutput;
@@ -1966,7 +1980,7 @@ interface OutputLineProps {
   onFileClick?: (path: string) => void;
 }
 
-function OutputLine({ output, agentId, onImageClick, onFileClick }: OutputLineProps) {
+const OutputLine = memo(function OutputLine({ output, agentId, onImageClick, onFileClick }: OutputLineProps) {
   const state = useStore();
   const hideCost = state.settings.hideCost;
   const { text: rawText, isStreaming, isUserPrompt } = output;
@@ -2112,7 +2126,7 @@ function OutputLine({ output, agentId, onImageClick, onFileClick }: OutputLinePr
       ) : text}
     </div>
   );
-}
+});
 
 // Compact idle time format for small spaces (e.g., "2m", "1h", "3d")
 function formatIdleTimeCompact(timestamp: number): string {

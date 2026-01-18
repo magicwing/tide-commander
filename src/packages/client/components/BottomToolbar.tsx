@@ -1,5 +1,5 @@
-import React from 'react';
-import { store, useStore } from '../store';
+import React, { useMemo } from 'react';
+import { store, useAgents, useSelectedAgentIds } from '../store';
 import { formatTokens, formatTimeAgo } from '../utils/formatting';
 import { ModelPreview } from './ModelPreview';
 
@@ -17,10 +17,14 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export function BottomToolbar({ onFocusAgent, onKillAgent }: BottomToolbarProps) {
-  const { agents, selectedAgentIds } = useStore();
+  const agents = useAgents();
+  const selectedAgentIds = useSelectedAgentIds();
 
   // Get the first selected agent (for single selection display)
-  const selectedAgentId = selectedAgentIds.size === 1 ? Array.from(selectedAgentIds)[0] : null;
+  const selectedAgentId = useMemo(() =>
+    selectedAgentIds.size === 1 ? Array.from(selectedAgentIds)[0] : null,
+    [selectedAgentIds]
+  );
   const selectedAgent = selectedAgentId ? agents.get(selectedAgentId) : null;
 
   // Calculate context usage from actual contextUsed/contextLimit

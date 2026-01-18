@@ -426,7 +426,7 @@ function AppContent() {
   return (
     <div className="app">
       {/* FPS Meter - development only */}
-      <FPSMeter visible={showFPS} position="top-right" />
+      <FPSMeter visible={showFPS} position="bottom-left" />
 
       <main className="main-content">
         <div className="battlefield-container">

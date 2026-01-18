@@ -1,12 +1,12 @@
-import React, { useState } from 'react';
-import { useStore, store } from '../store';
+import React, { useState, useMemo } from 'react';
+import { store, useSelectedAgentIds, useSelectedAgents } from '../store';
 
 export function CommandInput() {
   const [command, setCommand] = useState('');
-  const state = useStore();
+  const selectedAgentIds = useSelectedAgentIds();
+  const selectedAgents = useSelectedAgents();
 
-  const hasSelection = state.selectedAgentIds.size > 0;
-  const selectedAgents = store.getSelectedAgents();
+  const hasSelection = selectedAgentIds.size > 0;
 
   // Calculate total queued commands across selected agents
   const totalQueuedCommands = selectedAgents.reduce(
@@ -18,9 +18,9 @@ export function CommandInput() {
   const anyWorking = selectedAgents.some(agent => agent?.status === 'working');
 
   const getPlaceholder = () => {
-    if (state.selectedAgentIds.size === 0) {
+    if (selectedAgentIds.size === 0) {
       return 'Select an agent to send commands...';
-    } else if (state.selectedAgentIds.size === 1) {
+    } else if (selectedAgentIds.size === 1) {
       const agent = selectedAgents[0];
       if (agent?.status === 'working') {
         return `Enter command to queue for ${agent?.name || 'agent'}...`;
@@ -28,16 +28,16 @@ export function CommandInput() {
       return `Enter command for ${agent?.name || 'agent'}...`;
     } else {
       if (anyWorking) {
-        return `Enter command to queue for ${state.selectedAgentIds.size} agents...`;
+        return `Enter command to queue for ${selectedAgentIds.size} agents...`;
       }
-      return `Enter command for ${state.selectedAgentIds.size} agents...`;
+      return `Enter command for ${selectedAgentIds.size} agents...`;
     }
   };
 
   const handleSend = () => {
     if (!command.trim() || !hasSelection) return;
 
-    for (const agentId of state.selectedAgentIds) {
+    for (const agentId of selectedAgentIds) {
       store.sendCommand(agentId, command.trim());
     }
 

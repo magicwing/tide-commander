@@ -1,5 +1,5 @@
-import React from 'react';
-import { useStore, store, Activity } from '../store';
+import React, { useCallback, useMemo } from 'react';
+import { store, useActivities, Activity } from '../store';
 import { formatTime } from '../utils/formatting';
 
 // Tool icons for common tools
@@ -20,13 +20,16 @@ const TOOL_ICONS: Record<string, string> = {
 const TOOL_NAMES = ['WebSearch', 'WebFetch', 'Read', 'Write', 'Edit', 'Bash', 'Grep', 'Glob', 'Task', 'TodoWrite', 'NotebookEdit', 'AskUserQuestion'];
 
 export function ActivityFeed() {
-  const state = useStore();
+  const activities = useActivities();
 
-  const handleActivityClick = (agentId: string) => {
+  const handleActivityClick = useCallback((agentId: string) => {
     store.selectAgent(agentId);
-  };
+  }, []);
 
-  if (state.activities.length === 0) {
+  // Memoize the sliced activities to avoid creating new array on each render
+  const displayedActivities = useMemo(() => activities.slice(0, 100), [activities]);
+
+  if (activities.length === 0) {
     return (
       <div className="activity-empty">
         <span style={{ opacity: 0.5 }}>No activity yet...</span>
@@ -36,7 +39,7 @@ export function ActivityFeed() {
 
   return (
     <div id="activity-list">
-      {state.activities.slice(0, 100).map((activity, index) => (
+      {displayedActivities.map((activity, index) => (
         <ActivityItem
           key={`${activity.timestamp}-${index}`}
           activity={activity}

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { store, useStore } from '../store';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { store, useAgents } from '../store';
 import { AGENT_CLASS_CONFIG, LOTR_NAMES, CHARACTER_MODELS } from '../scene/config';
 import type { AgentClass, PermissionMode } from '../../shared/types';
 import { PERMISSION_MODES } from '../../shared/types';
@@ -35,7 +35,7 @@ function getRandomLotrName(usedNames: Set<string>): string {
 }
 
 export function SpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: SpawnModalProps) {
-  const { agents } = useStore();
+  const agents = useAgents();
   const [name, setName] = useState('');
   const [cwd, setCwd] = useState(() => localStorage.getItem('tide-last-cwd') || '');
   const [selectedClass, setSelectedClass] = useState<AgentClass>('scout');
