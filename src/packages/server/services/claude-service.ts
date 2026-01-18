@@ -144,6 +144,7 @@ function handleEvent(agentId: string, event: StandardEvent): void {
       break;
 
     case 'tool_start':
+      log.log(` Agent ${agentId} tool_start: toolName=${event.toolName}`);
       agentService.updateAgent(agentId, {
         status: 'working',
         currentTool: event.toolName,
@@ -226,7 +227,8 @@ function handleError(agentId: string, error: string): void {
 // ============================================================================
 
 // Internal function to actually execute a command
-async function executeCommand(agentId: string, command: string): Promise<void> {
+// forceNewSession: when true, don't resume existing session (for boss team questions)
+async function executeCommand(agentId: string, command: string, systemPrompt?: string, disableTools?: boolean, forceNewSession?: boolean): Promise<void> {
   if (!runner) {
     throw new Error('ClaudeService not initialized');
   }
@@ -237,6 +239,9 @@ async function executeCommand(agentId: string, command: string): Promise<void> {
   }
 
   log.log(` Executing command for ${agentId}: ${command.substring(0, 50)}...`);
+  if (forceNewSession) {
+    log.log(` Force new session mode - not resuming existing session`);
+  }
 
   // Notify that command is starting (so client can show user prompt in conversation)
   notifyCommandStarted(agentId, command);
@@ -256,11 +261,17 @@ async function executeCommand(agentId: string, command: string): Promise<void> {
     sessionId: agent.sessionId,
     useChrome: agent.useChrome,
     permissionMode: agent.permissionMode,
+    systemPrompt,
+    disableTools,
+    forceNewSession,
   });
 }
 
 // Public function to send a command - sends directly to running process or starts new one
-export async function sendCommand(agentId: string, command: string): Promise<void> {
+// systemPrompt is only used when starting a new process (not for messages to running process)
+// disableTools disables all tools (used for boss team questions to force direct response)
+// forceNewSession: when true, don't resume existing session (for boss team questions with context)
+export async function sendCommand(agentId: string, command: string, systemPrompt?: string, disableTools?: boolean, forceNewSession?: boolean): Promise<void> {
   if (!runner) {
     throw new Error('ClaudeService not initialized');
   }
@@ -273,8 +284,9 @@ export async function sendCommand(agentId: string, command: string): Promise<voi
   // Increment task counter for this agent
   agentService.updateAgent(agentId, { taskCount: (agent.taskCount || 0) + 1 });
 
-  // If agent has a running process, send message directly to it
-  if (runner.isRunning(agentId)) {
+  // If agent has a running process and we're NOT disabling tools or forcing new session, send message directly
+  // Note: systemPrompt, disableTools, forceNewSession are ignored for running processes (only applies to new sessions)
+  if (runner.isRunning(agentId) && !disableTools && !forceNewSession) {
     const sent = runner.sendMessage(agentId, command);
     if (sent) {
       log.log(` Sent message directly to running process for ${agentId}: ${command.substring(0, 50)}...`);
@@ -286,8 +298,8 @@ export async function sendCommand(agentId: string, command: string): Promise<voi
     log.log(` Failed to send to running process, starting new one for ${agentId}`);
   }
 
-  // Agent is idle or sending failed, execute with new process
-  await executeCommand(agentId, command);
+  // Agent is idle, sending failed, or we need special options - execute with new process
+  await executeCommand(agentId, command, systemPrompt, disableTools, forceNewSession);
 }
 
 export async function stopAgent(agentId: string): Promise<void> {

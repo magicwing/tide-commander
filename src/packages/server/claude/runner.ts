@@ -31,18 +31,21 @@ export class ClaudeRunner {
    * Run a prompt for an agent
    */
   async run(request: RunnerRequest): Promise<void> {
-    const { agentId, prompt, workingDir, sessionId, model, useChrome, permissionMode = 'bypass' } = request;
+    const { agentId, prompt, workingDir, sessionId, model, useChrome, permissionMode = 'bypass', systemPrompt, disableTools, forceNewSession } = request;
 
     // Kill existing process for this agent if any
     await this.stop(agentId);
 
     // Build CLI arguments
+    // If forceNewSession is true, don't pass sessionId (start fresh)
     const args = this.backend.buildArgs({
-      sessionId,
+      sessionId: forceNewSession ? undefined : sessionId,
       model,
       workingDir,
       permissionMode,
       useChrome,
+      systemPrompt,
+      disableTools,
     });
 
     // Get executable path

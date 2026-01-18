@@ -578,6 +578,9 @@ const SINGLE_AGENT_PROMPT = `You are a Supervisor AI analyzing a single coding a
 - If "status" is "idle", they finished. Use: "Idle - Last worked on [brief description of assignedTask or recentActivities]"
 - NEVER say "No current task" - always describe what they were working on based on assignedTask or recentActivities
 - Keep statusDescription concise (under 80 characters)
+- Extract file paths from recentActivities if tools like Read, Write, Edit were used
+- Identify blockers if agent seems stuck, has errors, or hasn't made progress
+- Provide actionable suggestions if there are issues or room for improvement
 
 ## Response Format
 Respond with ONLY this JSON (no markdown fences):
@@ -587,6 +590,10 @@ Respond with ONLY this JSON (no markdown fences):
   "statusDescription": "Concise current/last activity",
   "progress": "on_track" | "stalled" | "blocked" | "completed" | "idle",
   "recentWorkSummary": "2-3 sentence summary of recent work",
+  "currentFocus": "What the agent is currently focused on or last worked on",
+  "blockers": ["Any issues blocking progress"],
+  "suggestions": ["Actionable suggestions for next steps or improvements"],
+  "filesModified": ["List of file paths that were read/written/edited"],
   "concerns": []
 }`;
 
@@ -616,6 +623,10 @@ function parseSingleAgentResponse(response: string, summary: AgentStatusSummary)
       statusDescription: parsed.statusDescription || `${summary.status} - ${summary.currentTask || 'Task completed'}`,
       progress: parsed.progress || (summary.status === 'working' ? 'on_track' : 'idle'),
       recentWorkSummary: parsed.recentWorkSummary || 'No recent activity',
+      currentFocus: parsed.currentFocus,
+      blockers: parsed.blockers || [],
+      suggestions: parsed.suggestions || [],
+      filesModified: parsed.filesModified || [],
       concerns: parsed.concerns || [],
     };
   } catch (err) {

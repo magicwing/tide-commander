@@ -25,6 +25,20 @@ const STATUS_COLORS: Record<BuildingStatus, string> = {
   stopping: '#ffaa00',
 };
 
+// Preset colors for building customization
+const BUILDING_COLORS = [
+  { value: '', label: 'Default' },
+  { value: '#2a2a3a', label: 'Dark Gray' },
+  { value: '#3a2a2a', label: 'Dark Red' },
+  { value: '#2a3a2a', label: 'Dark Green' },
+  { value: '#2a2a4a', label: 'Dark Blue' },
+  { value: '#3a3a2a', label: 'Dark Yellow' },
+  { value: '#3a2a3a', label: 'Dark Purple' },
+  { value: '#2a3a3a', label: 'Dark Cyan' },
+  { value: '#4a3a3a', label: 'Warm Brown' },
+  { value: '#3a4a4a', label: 'Cool Steel' },
+];
+
 export function BuildingConfigModal({
   isOpen,
   onClose,
@@ -39,6 +53,7 @@ export function BuildingConfigModal({
   const [name, setName] = useState('');
   const [type, setType] = useState<BuildingType>('server');
   const [style, setStyle] = useState<BuildingStyle>('server-rack');
+  const [color, setColor] = useState('');
   const [cwd, setCwd] = useState('');
   const [startCmd, setStartCmd] = useState('');
   const [stopCmd, setStopCmd] = useState('');
@@ -59,6 +74,7 @@ export function BuildingConfigModal({
         setName(building.name);
         setType(building.type);
         setStyle(building.style || 'server-rack');
+        setColor(building.color || '');
         setCwd(building.cwd || '');
         setStartCmd(building.commands?.start || '');
         setStopCmd(building.commands?.stop || '');
@@ -71,6 +87,7 @@ export function BuildingConfigModal({
         setName('New Server');
         setType('server');
         setStyle('server-rack');
+        setColor('');
         setCwd(localStorage.getItem('tide-last-cwd') || '');
         setStartCmd('');
         setStopCmd('');
@@ -98,6 +115,7 @@ export function BuildingConfigModal({
       name,
       type,
       style,
+      color: color || undefined,
       position: initialPosition || building?.position || { x: 0, z: 0 },
       cwd: cwd || undefined,
       commands: {
@@ -217,6 +235,31 @@ export function BuildingConfigModal({
                     <span className="building-style-name">{BUILDING_STYLES[s].label}</span>
                   </button>
                 ))}
+              </div>
+            </div>
+
+            <div className="form-section">
+              <label className="form-label">Color</label>
+              <div className="building-color-selector">
+                {BUILDING_COLORS.map((c) => (
+                  <button
+                    key={c.value || 'default'}
+                    type="button"
+                    className={`building-color-btn ${color === c.value ? 'active' : ''}`}
+                    onClick={() => setColor(c.value)}
+                    title={c.label}
+                    style={c.value ? { backgroundColor: c.value } : undefined}
+                  >
+                    {!c.value && <span className="color-default-icon">⚙</span>}
+                  </button>
+                ))}
+                <input
+                  type="color"
+                  className="building-color-picker"
+                  value={color || '#2a2a3a'}
+                  onChange={(e) => setColor(e.target.value)}
+                  title="Custom color"
+                />
               </div>
             </div>
 

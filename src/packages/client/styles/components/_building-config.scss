@@ -1,4 +1,5 @@
 // Building Config Modal Styles
+@use '../variables' as *;
 
 .building-config-modal {
   width: 550px;
@@ -39,26 +40,26 @@
     justify-content: space-between;
     align-items: center;
     font-size: 0.85rem;
-    color: var(--text-secondary);
+    color: $text-secondary;
     font-weight: 500;
   }
 
   .form-input {
-    background: var(--bg-dark);
-    border: 1px solid var(--border-color);
+    background: $bg-primary;
+    border: 1px solid $border-color;
     border-radius: 4px;
     padding: 0.5rem 0.75rem;
-    color: var(--text-primary);
+    color: $text-primary;
     font-size: 0.9rem;
     transition: border-color 0.2s;
 
     &:focus {
       outline: none;
-      border-color: var(--accent-color);
+      border-color: $accent-blue;
     }
 
     &::placeholder {
-      color: var(--text-muted);
+      color: $text-muted;
     }
   }
 
@@ -75,21 +76,22 @@
     align-items: center;
     gap: 0.25rem;
     padding: 0.5rem 0.75rem;
-    background: var(--bg-dark);
-    border: 1px solid var(--border-color);
+    background: $bg-primary;
+    border: 1px solid $border-color;
     border-radius: 6px;
     cursor: pointer;
     transition: all 0.2s;
     min-width: 70px;
+    color: $text-primary;
 
     &:hover {
-      border-color: var(--accent-color);
-      background: var(--bg-lighter);
+      border-color: $accent-blue;
+      background: $bg-tertiary;
     }
 
     &.active {
-      border-color: var(--accent-color);
-      background: rgba(var(--accent-color-rgb), 0.1);
+      border-color: $accent-blue;
+      background: rgba($accent-blue, 0.1);
     }
 
     .building-type-icon {
@@ -98,7 +100,7 @@
 
     .building-type-name {
       font-size: 0.7rem;
-      color: var(--text-secondary);
+      color: $text-secondary;
       text-transform: capitalize;
     }
   }
@@ -116,28 +118,29 @@
     align-items: center;
     gap: 0.35rem;
     padding: 0.5rem 0.6rem;
-    background: var(--bg-dark);
-    border: 1px solid var(--border-color);
+    background: $bg-primary;
+    border: 1px solid $border-color;
     border-radius: 6px;
     cursor: pointer;
     transition: all 0.2s;
     min-width: 80px;
+    color: $text-primary;
 
     &:hover {
-      border-color: var(--accent-color);
-      background: var(--bg-lighter);
+      border-color: $accent-blue;
+      background: $bg-tertiary;
     }
 
     &.active {
-      border-color: var(--accent-color);
-      background: rgba(var(--accent-color-rgb), 0.1);
+      border-color: $accent-blue;
+      background: rgba($accent-blue, 0.1);
     }
 
     .building-style-preview {
       width: 36px;
       height: 36px;
       border-radius: 4px;
-      background: var(--bg-lighter);
+      background: $bg-tertiary;
       position: relative;
       overflow: hidden;
 
@@ -249,6 +252,157 @@
           animation: pyramid-glow 2s ease-in-out infinite;
         }
       }
+
+      // Desktop PC style preview
+      &[data-style="desktop"] {
+        background: linear-gradient(180deg, #3a3a4a 0%, #2a2a3a 100%);
+        &::before {
+          content: '';
+          position: absolute;
+          left: 50%;
+          top: 6px;
+          width: 22px;
+          height: 14px;
+          background: #1a1a2a;
+          transform: translateX(-50%);
+          border: 2px solid #4a4a5a;
+          border-radius: 2px;
+        }
+        &::after {
+          content: '';
+          position: absolute;
+          left: 50%;
+          bottom: 6px;
+          width: 18px;
+          height: 6px;
+          background: #4a4a5a;
+          transform: translateX(-50%);
+          border-radius: 1px;
+          box-shadow:
+            0 -4px 0 1px #3a3a4a,
+            -12px 2px 0 0 #3a3a4a;
+        }
+      }
+
+      // Filing Cabinet style preview
+      &[data-style="filing-cabinet"] {
+        background: linear-gradient(180deg, #5a5a6a 0%, #4a4a5a 100%);
+        &::before {
+          content: '';
+          position: absolute;
+          left: 50%;
+          top: 4px;
+          width: 20px;
+          height: 28px;
+          background: #4a4a5a;
+          transform: translateX(-50%);
+          border-radius: 2px;
+          box-shadow:
+            inset 0 6px 0 #3a3a4a,
+            inset 0 13px 0 #3a3a4a,
+            inset 0 20px 0 #3a3a4a;
+        }
+        &::after {
+          content: '';
+          position: absolute;
+          left: 50%;
+          top: 8px;
+          width: 8px;
+          height: 2px;
+          background: #8a8a9a;
+          transform: translateX(-50%);
+          box-shadow:
+            0 7px 0 #8a8a9a,
+            0 14px 0 #8a8a9a,
+            0 21px 0 #8a8a9a;
+        }
+      }
+
+      // Satellite Dish style preview
+      &[data-style="satellite"] {
+        background: linear-gradient(180deg, #2a3a4a 0%, #1a2a3a 100%);
+        &::before {
+          content: '';
+          position: absolute;
+          left: 50%;
+          bottom: 6px;
+          width: 4px;
+          height: 16px;
+          background: #4a4a5a;
+          transform: translateX(-50%);
+        }
+        &::after {
+          content: '';
+          position: absolute;
+          left: 50%;
+          top: 6px;
+          width: 20px;
+          height: 10px;
+          background: transparent;
+          transform: translateX(-50%);
+          border: 3px solid #6a6a7a;
+          border-radius: 50% 50% 0 0;
+          border-bottom: none;
+        }
+      }
+
+      // Data Crystal style preview
+      &[data-style="crystal"] {
+        background: linear-gradient(180deg, #2a2a4a 0%, #1a1a3a 100%);
+        &::before {
+          content: '';
+          position: absolute;
+          left: 50%;
+          top: 50%;
+          width: 16px;
+          height: 16px;
+          background: rgba(154, 74, 255, 0.6);
+          transform: translate(-50%, -50%) rotate(45deg);
+          animation: crystal-float 2s ease-in-out infinite;
+        }
+        &::after {
+          content: '';
+          position: absolute;
+          left: 50%;
+          top: 50%;
+          width: 22px;
+          height: 22px;
+          border: 1px solid rgba(74, 158, 255, 0.5);
+          border-radius: 50%;
+          transform: translate(-50%, -50%);
+          animation: crystal-orbit 3s linear infinite;
+        }
+      }
+
+      // Factory style preview
+      &[data-style="factory"] {
+        background: linear-gradient(180deg, #4a4a4a 0%, #3a3a3a 100%);
+        &::before {
+          content: '';
+          position: absolute;
+          left: 6px;
+          bottom: 6px;
+          width: 20px;
+          height: 14px;
+          background: #5a4a4a;
+          border-radius: 2px 2px 0 0;
+        }
+        &::after {
+          content: '';
+          position: absolute;
+          right: 8px;
+          bottom: 6px;
+          width: 6px;
+          height: 22px;
+          background: #6a4a4a;
+          border-radius: 2px;
+          box-shadow:
+            0 -4px 0 2px rgba(136, 136, 136, 0.4),
+            0 -8px 0 3px rgba(136, 136, 136, 0.3),
+            0 -12px 0 4px rgba(136, 136, 136, 0.2);
+          animation: factory-smoke 1.5s ease-out infinite;
+        }
+      }
     }
 
     .building-style-name {
@@ -274,6 +428,93 @@
     50% { opacity: 0.6; box-shadow: 0 0 10px #ffaa00; }
   }
 
+  @keyframes crystal-float {
+    0%, 100% { transform: translate(-50%, -50%) rotate(45deg) translateY(0); }
+    50% { transform: translate(-50%, -50%) rotate(45deg) translateY(-2px); }
+  }
+
+  @keyframes crystal-orbit {
+    from { transform: translate(-50%, -50%) rotate(0deg); }
+    to { transform: translate(-50%, -50%) rotate(360deg); }
+  }
+
+  @keyframes factory-smoke {
+    0% { box-shadow:
+      0 -4px 0 2px rgba(136, 136, 136, 0.4),
+      0 -8px 0 3px rgba(136, 136, 136, 0.3),
+      0 -12px 0 4px rgba(136, 136, 136, 0.2);
+    }
+    50% { box-shadow:
+      0 -6px 0 2px rgba(136, 136, 136, 0.3),
+      0 -10px 0 3px rgba(136, 136, 136, 0.2),
+      0 -14px 0 4px rgba(136, 136, 136, 0.1);
+    }
+    100% { box-shadow:
+      0 -4px 0 2px rgba(136, 136, 136, 0.4),
+      0 -8px 0 3px rgba(136, 136, 136, 0.3),
+      0 -12px 0 4px rgba(136, 136, 136, 0.2);
+    }
+  }
+
+  // Color Selector
+  .building-color-selector {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .building-color-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    border: 2px solid $border-color;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: $bg-tertiary;
+
+    &:hover {
+      border-color: $accent-blue;
+      transform: scale(1.1);
+    }
+
+    &.active {
+      border-color: $accent-blue;
+      box-shadow: 0 0 6px rgba($accent-blue, 0.5);
+    }
+
+    .color-default-icon {
+      font-size: 0.8rem;
+      color: $text-muted;
+    }
+  }
+
+  .building-color-picker {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 2px solid $border-color;
+    border-radius: 4px;
+    cursor: pointer;
+    background: transparent;
+
+    &::-webkit-color-swatch-wrapper {
+      padding: 2px;
+    }
+
+    &::-webkit-color-swatch {
+      border: none;
+      border-radius: 2px;
+    }
+
+    &:hover {
+      border-color: $accent-blue;
+    }
+  }
+
   // Commands Section
   .commands-section {
     .command-inputs {
@@ -289,14 +530,14 @@
 
       .command-label {
         font-size: 0.8rem;
-        color: var(--text-muted);
+        color: $text-muted;
         min-width: 80px;
         text-align: right;
       }
 
       .form-input {
         flex: 1;
-        font-family: monospace;
+        font-family: $font-mono;
         font-size: 0.85rem;
       }
 
@@ -331,21 +572,21 @@
     .logs-container {
       max-height: 200px;
       overflow-y: auto;
-      background: var(--bg-dark);
-      border: 1px solid var(--border-color);
+      background: $bg-primary;
+      border: 1px solid $border-color;
       border-radius: 4px;
       padding: 0.5rem;
-      font-family: monospace;
+      font-family: $font-mono;
       font-size: 0.75rem;
     }
 
     .log-entry {
       margin: 0;
       padding: 0.25rem 0;
-      border-bottom: 1px solid var(--border-color);
+      border-bottom: 1px solid $border-color;
       white-space: pre-wrap;
       word-break: break-all;
-      color: var(--text-secondary);
+      color: $text-secondary;
 
       &:last-child {
         border-bottom: none;
@@ -358,7 +599,7 @@
     display: flex;
     gap: 0.5rem;
     padding: 1rem;
-    border-top: 1px solid var(--border-color);
+    border-top: 1px solid $border-color;
 
     .footer-spacer {
       flex: 1;
@@ -371,8 +612,15 @@
     border-radius: 4px;
     font-size: 0.9rem;
     cursor: pointer;
-    border: none;
+    border: 1px solid $border-color;
     transition: all 0.2s;
+    background: $bg-tertiary;
+    color: $text-primary;
+
+    &:hover {
+      background: $bg-secondary;
+      border-color: $accent-blue;
+    }
 
     &.btn-sm {
       padding: 0.25rem 0.5rem;
@@ -380,59 +628,67 @@
     }
 
     &.btn-primary {
-      background: var(--accent-color);
+      background: $accent-blue;
       color: #000;
+      border-color: $accent-blue;
 
       &:hover {
         filter: brightness(1.1);
+        border-color: $accent-blue;
       }
     }
 
     &.btn-secondary {
-      background: var(--bg-lighter);
-      color: var(--text-primary);
-      border: 1px solid var(--border-color);
+      background: $bg-tertiary;
+      color: $text-primary;
+      border: 1px solid $border-color;
 
       &:hover {
-        background: var(--bg-light);
+        background: $bg-secondary;
       }
     }
 
     &.btn-danger {
-      background: #ff4a4a;
+      background: $accent-red;
       color: #fff;
+      border-color: $accent-red;
 
       &:hover {
         filter: brightness(1.1);
+        border-color: $accent-red;
       }
     }
 
     &.btn-success {
-      background: #4aff9e;
+      background: $accent-green;
       color: #000;
+      border-color: $accent-green;
 
       &:hover {
         filter: brightness(1.1);
+        border-color: $accent-green;
       }
     }
 
     &.btn-warning {
-      background: #ffaa00;
+      background: $accent-orange;
       color: #000;
+      border-color: $accent-orange;
 
       &:hover {
         filter: brightness(1.1);
+        border-color: $accent-orange;
       }
     }
 
     &.btn-add {
       background: transparent;
-      color: var(--accent-color);
-      border: 1px dashed var(--accent-color);
+      color: $accent-blue;
+      border: 1px dashed $accent-blue;
       padding: 0.15rem 0.5rem;
 
       &:hover {
-        background: rgba(var(--accent-color-rgb), 0.1);
+        background: rgba($accent-blue, 0.1);
       }
     }
 

@@ -78,6 +78,25 @@ export class ClaudeBackend implements CLIBackend {
       args.push('--chrome');
     }
 
+    // System prompt for boss agents or custom context
+    // Use --append-system-prompt when resuming (--system-prompt is ignored on resume)
+    // Use --system-prompt for new sessions
+    if (config.systemPrompt) {
+      if (config.sessionId) {
+        // Resuming - append to existing system prompt
+        args.push('--append-system-prompt', config.systemPrompt);
+      } else {
+        // New session - set the system prompt
+        args.push('--system-prompt', config.systemPrompt);
+      }
+    }
+
+    // Disable tools (for boss team questions - forces direct response)
+    // Use '""' with escaped quotes since we spawn with shell: true
+    if (config.disableTools) {
+      args.push('--tools', '""');
+    }
+
     return args;
   }
 
@@ -110,6 +129,7 @@ export class ClaudeBackend implements CLIBackend {
 
   private parseSystemEvent(event: ClaudeRawEvent): StandardEvent | null {
     if (event.subtype === 'init') {
+      console.log(`[Backend] parseSystemEvent init: tools=${JSON.stringify(event.tools)}, agents=${JSON.stringify((event as any).agents)}`);
       return {
         type: 'init',
         sessionId: event.session_id,
@@ -177,6 +197,8 @@ export class ClaudeBackend implements CLIBackend {
 
   private parseResultEvent(event: ClaudeRawEvent): StandardEvent {
     log.log(`parseResultEvent: usage=${JSON.stringify(event.usage)}, cost=${event.total_cost_usd}`);
+    // Extract result text if available (used for boss delegation parsing)
+    const resultText = typeof event.result === 'string' ? event.result : undefined;
     return {
       type: 'step_complete',
       durationMs: event.duration_ms,
@@ -189,6 +211,7 @@ export class ClaudeBackend implements CLIBackend {
             cacheRead: event.usage.cache_read_input_tokens,
           }
         : undefined,
+      resultText,
     };
   }
 

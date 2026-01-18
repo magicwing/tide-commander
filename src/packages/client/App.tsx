@@ -135,6 +135,12 @@ function AppContent() {
       setIsToolboxOpen(true);
     });
 
+    // Set up building click callback - open toolbox when building is clicked
+    sceneRef.current?.setOnBuildingClick((buildingId) => {
+      store.selectBuilding(buildingId);
+      setIsToolboxOpen(true);
+    });
+
     // Set up websocket callbacks (always update refs)
     setCallbacks({
       onToast: showToast,
@@ -257,6 +263,11 @@ function AppContent() {
     store.killAgent(agentId);
   }, []);
 
+  // Handle calling subordinates to boss location
+  const handleCallSubordinates = useCallback((bossId: string) => {
+    sceneRef.current?.callSubordinates(bossId);
+  }, []);
+
   // Handle opening file explorer for an area
   const handleOpenAreaExplorer = useCallback((areaId: string) => {
     setExplorerAreaId(areaId);
@@ -377,14 +388,23 @@ function AppContent() {
         return;
       }
 
-      // Delete selected agents
+      // Delete selected agents or buildings
       const deleteShortcut = shortcuts.find(s => s.id === 'delete-selected');
       const deleteBackspaceShortcut = shortcuts.find(s => s.id === 'delete-selected-backspace');
       if ((matchesShortcut(e, deleteShortcut) || matchesShortcut(e, deleteBackspaceShortcut)) && !isInputFocused) {
         const currentState = store.getState();
+        // Check for selected agents first
         if (currentState.selectedAgentIds.size > 0) {
           e.preventDefault();
           setIsDeleteConfirmOpen(true);
+          return;
+        }
+        // Check for selected buildings
+        if (currentState.selectedBuildingIds.size > 0) {
+          e.preventDefault();
+          store.deleteSelectedBuildings();
+          sceneRef.current?.syncBuildings();
+          return;
         }
         return;
       }
@@ -409,6 +429,7 @@ function AppContent() {
                 <UnitPanel
                   onFocusAgent={handleFocusAgent}
                   onKillAgent={handleKillAgent}
+                  onCallSubordinates={handleCallSubordinates}
                   onOpenAreaExplorer={handleOpenAreaExplorer}
                 />
               </div>
@@ -421,6 +442,7 @@ function AppContent() {
               <UnitPanel
                 onFocusAgent={handleFocusAgent}
                 onKillAgent={handleKillAgent}
+                onCallSubordinates={handleCallSubordinates}
                 onOpenAreaExplorer={handleOpenAreaExplorer}
               />
             </div>

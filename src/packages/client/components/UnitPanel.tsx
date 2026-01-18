@@ -18,10 +18,11 @@ const PROGRESS_COLORS: Record<string, string> = {
 interface UnitPanelProps {
   onFocusAgent: (agentId: string) => void;
   onKillAgent: (agentId: string) => void;
+  onCallSubordinates?: (bossId: string) => void;
   onOpenAreaExplorer?: (areaId: string) => void;
 }
 
-export function UnitPanel({ onFocusAgent, onKillAgent, onOpenAreaExplorer }: UnitPanelProps) {
+export function UnitPanel({ onFocusAgent, onKillAgent, onCallSubordinates, onOpenAreaExplorer }: UnitPanelProps) {
   const state = useStore();
   const selectedAgents = store.getSelectedAgents();
 
@@ -37,6 +38,7 @@ export function UnitPanel({ onFocusAgent, onKillAgent, onOpenAreaExplorer }: Uni
         agent={agent}
         onFocusAgent={onFocusAgent}
         onKillAgent={onKillAgent}
+        onCallSubordinates={onCallSubordinates}
         onOpenAreaExplorer={onOpenAreaExplorer}
       />
     );
@@ -336,6 +338,7 @@ interface SingleAgentPanelProps {
   agent: Agent;
   onFocusAgent: (agentId: string) => void;
   onKillAgent: (agentId: string) => void;
+  onCallSubordinates?: (bossId: string) => void;
   onOpenAreaExplorer?: (areaId: string) => void;
 }
 
@@ -356,7 +359,7 @@ interface RememberedPattern {
   createdAt: number;
 }
 
-function SingleAgentPanel({ agent: agentProp, onFocusAgent, onKillAgent, onOpenAreaExplorer }: SingleAgentPanelProps) {
+function SingleAgentPanel({ agent: agentProp, onFocusAgent, onKillAgent, onCallSubordinates, onOpenAreaExplorer }: SingleAgentPanelProps) {
   const state = useStore();
   // Get the latest agent data from the store to ensure we have current values
   const agent = state.agents.get(agentProp.id) || agentProp;
@@ -367,6 +370,7 @@ function SingleAgentPanel({ agent: agentProp, onFocusAgent, onKillAgent, onOpenA
   const [showHistory, setShowHistory] = useState(true);
   const [showPatterns, setShowPatterns] = useState(false);
   const [rememberedPatterns, setRememberedPatterns] = useState<RememberedPattern[]>([]);
+  const [contextConfirm, setContextConfirm] = useState<'collapse' | 'clear' | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   // Get supervisor history for this agent
@@ -544,6 +548,30 @@ function SingleAgentPanel({ agent: agentProp, onFocusAgent, onKillAgent, onOpenA
             title="Focus on agent"
           >
             🎯
+          </button>
+          {agent.class === 'boss' && agent.subordinateIds && agent.subordinateIds.length > 0 && (
+            <button
+              className="unit-action-icon"
+              onClick={() => onCallSubordinates?.(agent.id)}
+              title="Call subordinates"
+            >
+              📢
+            </button>
+          )}
+          <button
+            className="unit-action-icon"
+            onClick={() => setContextConfirm('collapse')}
+            title="Collapse context"
+            disabled={agent.status !== 'idle'}
+          >
+            📦
+          </button>
+          <button
+            className="unit-action-icon warning"
+            onClick={() => setContextConfirm('clear')}
+            title="Clear context"
+          >
+            🗑️
           </button>
           <button
             className="unit-action-icon danger"
@@ -758,6 +786,57 @@ function SingleAgentPanel({ agent: agentProp, onFocusAgent, onKillAgent, onOpenA
         <SubordinateBadge agentId={agent.id} bossId={agent.bossId} />
       )}
 
+      {/* Link to Boss option (if agent is not a boss and has no boss) */}
+      {agent.class !== 'boss' && !agent.bossId && (
+        <LinkToBossSection agentId={agent.id} />
+      )}
+
+      {/* Context Action Confirmation Modal */}
+      {contextConfirm && (
+        <div className="modal-overlay visible" onClick={() => setContextConfirm(null)}>
+          <div className="modal confirm-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              {contextConfirm === 'collapse' ? 'Collapse Context' : 'Clear Context'}
+            </div>
+            <div className="modal-body confirm-modal-body">
+              {contextConfirm === 'collapse' ? (
+                <>
+                  <p>Collapse the conversation context for <strong>{agent.name}</strong>?</p>
+                  <p className="confirm-modal-note">
+                    This will summarize the conversation to save tokens while preserving important information.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p>Clear all context for <strong>{agent.name}</strong>?</p>
+                  <p className="confirm-modal-note">
+                    This will start a fresh session on the next command. All conversation history will be lost.
+                  </p>
+                </>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setContextConfirm(null)}>
+                Cancel
+              </button>
+              <button
+                className={`btn ${contextConfirm === 'clear' ? 'btn-danger' : 'btn-primary'}`}
+                onClick={() => {
+                  if (contextConfirm === 'collapse') {
+                    store.collapseContext(agent.id);
+                  } else {
+                    store.clearContext(agent.id);
+                  }
+                  setContextConfirm(null);
+                }}
+                autoFocus
+              >
+                {contextConfirm === 'collapse' ? 'Collapse' : 'Clear Context'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -959,6 +1038,16 @@ function BossAgentSection({ agent }: BossAgentSectionProps) {
                     <span className={`boss-subordinate-status status-${sub.status}`}>
                       {sub.status}
                     </span>
+                    <button
+                      className="boss-subordinate-unlink"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        store.removeSubordinate(agent.id, sub.id);
+                      }}
+                      title="Unlink subordinate"
+                    >
+                      ✕
+                    </button>
                   </div>
                 );
               })
@@ -1097,6 +1186,11 @@ function SubordinateBadge({ agentId, bossId }: SubordinateBadgeProps) {
 
   const bossConfig = AGENT_CLASSES.boss;
 
+  const handleUnlink = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    store.removeSubordinate(bossId, agentId);
+  };
+
   return (
     <div className="subordinate-badge">
       <span className="subordinate-badge-icon" style={{ color: bossConfig.color }}>
@@ -1112,6 +1206,91 @@ function SubordinateBadge({ agentId, bossId }: SubordinateBadgeProps) {
       >
         →
       </button>
+      <button
+        className="subordinate-badge-unlink"
+        onClick={handleUnlink}
+        title="Unlink from boss"
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+interface LinkToBossSectionProps {
+  agentId: string;
+}
+
+function LinkToBossSection({ agentId }: LinkToBossSectionProps) {
+  const state = useStore();
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  // Get all boss agents
+  const bossAgents = Array.from(state.agents.values()).filter(
+    (a) => a.class === 'boss'
+  );
+
+  if (bossAgents.length === 0) {
+    return null; // No bosses available
+  }
+
+  const bossConfig = AGENT_CLASSES.boss;
+
+  const handleLinkToBoss = (bossId: string) => {
+    const boss = state.agents.get(bossId);
+    if (!boss) return;
+
+    // Add this agent to the boss's subordinates
+    const currentSubs = boss.subordinateIds || [];
+    store.assignSubordinates(bossId, [...currentSubs, agentId]);
+    setIsExpanded(false);
+  };
+
+  return (
+    <div className="link-to-boss-section">
+      {!isExpanded ? (
+        <button
+          className="link-to-boss-btn"
+          onClick={() => setIsExpanded(true)}
+        >
+          <span className="link-to-boss-icon" style={{ color: bossConfig.color }}>
+            {bossConfig.icon}
+          </span>
+          <span>Link to Boss</span>
+        </button>
+      ) : (
+        <div className="link-to-boss-dropdown">
+          <div className="link-to-boss-header">
+            <span>Select a Boss</span>
+            <button
+              className="link-to-boss-close"
+              onClick={() => setIsExpanded(false)}
+            >
+              ✕
+            </button>
+          </div>
+          <div className="link-to-boss-list">
+            {bossAgents.map((boss) => (
+              <div
+                key={boss.id}
+                className="link-to-boss-item"
+                onClick={() => handleLinkToBoss(boss.id)}
+              >
+                <span
+                  className="link-to-boss-item-icon"
+                  style={{ color: bossConfig.color }}
+                >
+                  {bossConfig.icon}
+                </span>
+                <span className="link-to-boss-item-name">{boss.name}</span>
+                <span className="link-to-boss-item-count">
+                  {boss.subordinateIds?.length || 0} agents
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -331,10 +331,26 @@ function handleServerMessage(message: ServerMessage): void {
 
     case 'delegation_decision': {
       const decision = message.payload as DelegationDecision;
+      console.log(`[WS] Received delegation_decision:`, decision);
       store.handleDelegationDecision(decision);
       // Show toast for the delegation
       if (decision.status === 'sent') {
         onToast?.('info', 'Task Delegated', `Delegated to ${decision.selectedAgentName}: ${decision.reasoning.slice(0, 80)}...`);
+
+        // Automatically forward the command to the delegated subordinate
+        console.log(`[WS] Checking auto-forward: agentId=${decision.selectedAgentId}, userCommand=${decision.userCommand?.slice(0, 50)}`);
+        if (decision.selectedAgentId && decision.userCommand) {
+          console.log(`[WS] Auto-forwarding command to subordinate ${decision.selectedAgentName}:`, decision.userCommand.slice(0, 50));
+          sendMessage({
+            type: 'send_command',
+            payload: {
+              agentId: decision.selectedAgentId,
+              command: decision.userCommand,
+            },
+          });
+        } else {
+          console.log(`[WS] Auto-forward SKIPPED: missing agentId or userCommand`);
+        }
       }
       break;
     }

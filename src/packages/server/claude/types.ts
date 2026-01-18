@@ -33,6 +33,7 @@ export interface StandardEvent {
   model?: string;
   tools?: string[];
   errorMessage?: string;
+  resultText?: string;  // Full result text from result event (for boss delegation parsing)
 }
 
 // Configuration for backend
@@ -44,6 +45,7 @@ export interface BackendConfig {
   prompt?: string;
   systemPrompt?: string;
   useChrome?: boolean;
+  disableTools?: boolean;  // Disable all tools (for boss team questions)
 }
 
 // Raw event from Claude CLI (partial typing for flexibility)
@@ -120,6 +122,9 @@ export interface RunnerRequest {
   model?: string;
   useChrome?: boolean;
   permissionMode?: 'bypass' | 'interactive';
+  systemPrompt?: string;
+  disableTools?: boolean;  // Disable all tools (for boss team questions)
+  forceNewSession?: boolean;  // Don't resume existing session (for boss team questions)
 }
 
 // Runner callbacks

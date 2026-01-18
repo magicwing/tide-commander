@@ -36,6 +36,7 @@ export class SceneManager {
 
   // State
   private agentMeshes = new Map<string, AgentMeshData>();
+  private bossSubordinateLines: THREE.Line[] = [];
   private lastCameraSave = 0;
   private lastTimeUpdate = 0;
   private lastFrameTime = 0;
@@ -114,6 +115,16 @@ export class SceneManager {
     this.inputHandler.setBuildingAtPositionGetter((pos) => {
       const building = this.buildingManager.getBuildingAtPosition(pos);
       return building ? { id: building.id } : null;
+    });
+
+    // Set up building positions getter (for drag selection)
+    this.inputHandler.setBuildingPositionsGetter(() => {
+      const positions = new Map<string, THREE.Vector3>();
+      const meshData = this.buildingManager.getBuildingMeshData();
+      for (const [buildingId, data] of meshData) {
+        positions.set(buildingId, data.group.position.clone());
+      }
+      return positions;
     });
 
     // Create environment
@@ -373,11 +384,88 @@ export class SceneManager {
 
   refreshSelectionVisuals(): void {
     const state = store.getState();
+
+    // Clear existing boss-subordinate connection lines
+    for (const line of this.bossSubordinateLines) {
+      this.scene.remove(line);
+      line.geometry.dispose();
+      (line.material as THREE.Material).dispose();
+    }
+    this.bossSubordinateLines = [];
+
+    // Collect all bosses whose hierarchy should be shown
+    // This includes: selected bosses, and bosses of selected subordinates
+    const bossesToShow = new Map<string, Agent>();
+    const subordinateIdsOfSelectedBosses = new Set<string>();
+
+    for (const selectedId of state.selectedAgentIds) {
+      const selectedAgent = state.agents.get(selectedId);
+      if (!selectedAgent) continue;
+
+      // If selected agent is a boss, show their hierarchy
+      if (selectedAgent.class === 'boss' && selectedAgent.subordinateIds) {
+        bossesToShow.set(selectedAgent.id, selectedAgent);
+        for (const subId of selectedAgent.subordinateIds) {
+          subordinateIdsOfSelectedBosses.add(subId);
+        }
+      }
+
+      // If selected agent has a boss, show that boss's entire hierarchy
+      if (selectedAgent.bossId) {
+        const boss = state.agents.get(selectedAgent.bossId);
+        if (boss && boss.class === 'boss' && boss.subordinateIds) {
+          bossesToShow.set(boss.id, boss);
+          for (const subId of boss.subordinateIds) {
+            subordinateIdsOfSelectedBosses.add(subId);
+          }
+        }
+      }
+    }
+
+    // Draw connection lines from bosses to their subordinates
+    for (const [, boss] of bossesToShow) {
+      const bossMesh = this.agentMeshes.get(boss.id);
+      if (!bossMesh || !boss.subordinateIds) continue;
+
+      for (const subId of boss.subordinateIds) {
+        const subMesh = this.agentMeshes.get(subId);
+        if (!subMesh) continue;
+
+        // Create line from boss to subordinate
+        const points = [
+          new THREE.Vector3(
+            bossMesh.group.position.x,
+            0.05, // Slightly above ground
+            bossMesh.group.position.z
+          ),
+          new THREE.Vector3(
+            subMesh.group.position.x,
+            0.05,
+            subMesh.group.position.z
+          ),
+        ];
+
+        const geometry = new THREE.BufferGeometry().setFromPoints(points);
+        const material = new THREE.LineBasicMaterial({
+          color: 0xffd700, // Gold color to match subordinate highlight
+          transparent: true,
+          opacity: 0.3,
+        });
+        const line = new THREE.Line(geometry, material);
+        this.scene.add(line);
+        this.bossSubordinateLines.push(line);
+      }
+    }
+
+    // Also track boss IDs that should be highlighted
+    const bossIdsToHighlight = new Set(bossesToShow.keys());
+
     for (const [agentId, meshData] of this.agentMeshes) {
       const agent = state.agents.get(agentId);
       if (agent) {
         const isSelected = state.selectedAgentIds.has(agentId);
-        this.characterFactory.updateVisuals(meshData.group, agent, isSelected);
+        const isPartOfSelectedHierarchy = subordinateIdsOfSelectedBosses.has(agentId) || bossIdsToHighlight.has(agentId);
+        this.characterFactory.updateVisuals(meshData.group, agent, isSelected, isPartOfSelectedHierarchy && !isSelected);
       }
     }
   }
@@ -411,6 +499,35 @@ export class SceneManager {
     const newTarget = new THREE.Vector3(agent.position.x, agent.position.y, agent.position.z);
     this.controls.target.copy(newTarget);
     this.camera.position.copy(newTarget).add(offset);
+  }
+
+  /**
+   * Call all subordinates of a boss agent to walk to the boss's location.
+   */
+  callSubordinates(bossId: string): void {
+    const state = store.getState();
+    const boss = state.agents.get(bossId);
+    if (!boss || boss.class !== 'boss' || !boss.subordinateIds?.length) return;
+
+    const bossPosition = new THREE.Vector3(boss.position.x, boss.position.y, boss.position.z);
+
+    // Calculate formation positions around the boss
+    const positions = this.inputHandler.calculateFormationPositions(bossPosition, boss.subordinateIds.length);
+
+    // Create move order effect at boss position
+    this.effectsManager.createMoveOrderEffect(bossPosition.clone());
+
+    // Move each subordinate to their formation position
+    boss.subordinateIds.forEach((subId, index) => {
+      const pos = positions[index];
+      const meshData = this.agentMeshes.get(subId);
+
+      store.moveAgent(subId, pos);
+
+      if (meshData) {
+        this.movementAnimator.startMovement(subId, meshData, pos);
+      }
+    });
   }
 
   // ============================================
@@ -644,12 +761,23 @@ export class SceneManager {
     });
   }
 
-  private handleSelectionBox(agentIds: string[]): void {
+  private handleSelectionBox(agentIds: string[], buildingIds: string[]): void {
+    // Handle agent selection
     if (agentIds.length > 0) {
       store.selectMultiple(agentIds);
     } else {
       store.selectAgent(null);
     }
+
+    // Handle building selection
+    if (buildingIds.length > 0) {
+      store.selectMultipleBuildings(buildingIds);
+      this.buildingManager.highlightBuildings(buildingIds);
+    } else {
+      store.selectBuilding(null);
+      this.buildingManager.highlightBuilding(null);
+    }
+
     this.refreshSelectionVisuals();
   }
 
@@ -808,8 +936,62 @@ export class SceneManager {
       this.lastIdleTimerUpdate = now;
     }
 
+    // Update boss-subordinate connection lines to follow moving agents
+    this.updateBossSubordinateLines();
+
     this.renderer.render(this.scene, this.camera);
   };
+
+  private updateBossSubordinateLines(): void {
+    if (this.bossSubordinateLines.length === 0) return;
+
+    const state = store.getState();
+    let lineIndex = 0;
+
+    // Collect all bosses whose hierarchy is being shown
+    // (same logic as refreshSelectionVisuals)
+    const bossesToShow = new Map<string, Agent>();
+
+    for (const selectedId of state.selectedAgentIds) {
+      const selectedAgent = state.agents.get(selectedId);
+      if (!selectedAgent) continue;
+
+      // If selected agent is a boss
+      if (selectedAgent.class === 'boss' && selectedAgent.subordinateIds) {
+        bossesToShow.set(selectedAgent.id, selectedAgent);
+      }
+
+      // If selected agent has a boss
+      if (selectedAgent.bossId) {
+        const boss = state.agents.get(selectedAgent.bossId);
+        if (boss && boss.class === 'boss' && boss.subordinateIds) {
+          bossesToShow.set(boss.id, boss);
+        }
+      }
+    }
+
+    // Update line positions for each boss's subordinates
+    for (const [, boss] of bossesToShow) {
+      const bossMesh = this.agentMeshes.get(boss.id);
+      if (!bossMesh || !boss.subordinateIds) continue;
+
+      for (const subId of boss.subordinateIds) {
+        const subMesh = this.agentMeshes.get(subId);
+        if (!subMesh || lineIndex >= this.bossSubordinateLines.length) continue;
+
+        const line = this.bossSubordinateLines[lineIndex];
+        const positions = line.geometry.attributes.position as THREE.BufferAttribute;
+
+        // Update start point (boss position)
+        positions.setXYZ(0, bossMesh.group.position.x, 0.05, bossMesh.group.position.z);
+        // Update end point (subordinate position)
+        positions.setXYZ(1, subMesh.group.position.x, 0.05, subMesh.group.position.z);
+        positions.needsUpdate = true;
+
+        lineIndex++;
+      }
+    }
+  }
 
   private updateIdleTimers(): void {
     const state = store.getState();

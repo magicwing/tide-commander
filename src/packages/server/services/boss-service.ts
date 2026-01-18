@@ -226,6 +226,49 @@ export async function gatherSubordinateContext(bossId: string): Promise<Subordin
   }));
 }
 
+/**
+ * Build the system prompt for a boss agent
+ * Includes information about subordinates and their current status
+ */
+export async function buildBossSystemPrompt(bossId: string, bossName: string): Promise<string> {
+  const subordinates = await gatherSubordinateContext(bossId);
+
+  let prompt = `You are ${bossName}, a boss agent managing a team of developer agents.
+
+Your role is to:
+1. Answer questions about your team and their status
+2. Delegate coding tasks to the most appropriate subordinate
+3. Coordinate work across your team
+
+YOUR SUBORDINATES:
+`;
+
+  if (subordinates.length === 0) {
+    prompt += '\nYou currently have no subordinates assigned.\n';
+  } else {
+    for (const sub of subordinates) {
+      prompt += `\n- ${sub.name} (${sub.class}): ${sub.status}`;
+      if (sub.currentTask) {
+        prompt += `\n  Current task: ${sub.currentTask}`;
+      }
+      if (sub.lastAssignedTask) {
+        prompt += `\n  Last assigned: ${sub.lastAssignedTask}`;
+      }
+      if (sub.recentSupervisorSummary) {
+        prompt += `\n  Recent work: ${sub.recentSupervisorSummary}`;
+      }
+      prompt += `\n  Context: ${sub.contextPercent}% used`;
+    }
+  }
+
+  prompt += `
+
+When asked about your team, provide clear information about each subordinate's status and work.
+When given a coding task, analyze which subordinate is best suited and respond with your delegation decision.`;
+
+  return prompt;
+}
+
 // ============================================================================
 // Delegation Logic
 // ============================================================================
@@ -331,44 +374,24 @@ export async function delegateCommand(
 // LLM Integration
 // ============================================================================
 
-const DELEGATION_PROMPT = `You are a Boss Agent coordinating a team of coding agents in Tide Commander.
-Your role is to analyze incoming requests and delegate to the most appropriate subordinate agent.
+const DELEGATION_PROMPT = `You are a task router. Your ONLY job is to select which agent should handle the user's request.
 
-## Your Subordinate Agents
+IMPORTANT: You MUST respond with ONLY a JSON object. No explanations, no markdown, no other text.
+
+## Available Agents
 {{SUBORDINATES_DATA}}
 
 ## User Request
 "{{USER_COMMAND}}"
 
-## Decision Guidelines
-1. **Expertise Match**: Choose agent whose class best matches the task type
-   - scout: exploration, finding files, understanding codebase structure
-   - builder: implementing features, writing new code, adding functionality
-   - debugger: fixing bugs, debugging issues, error investigation
-   - architect: planning, design decisions, system architecture
-   - warrior: refactoring, migrations, aggressive code changes
-   - support: documentation, tests, cleanup, maintenance
+## Selection Rules
+- Match agent class to task type (scout=explore, builder=code, debugger=fix, architect=plan, warrior=refactor, support=docs/tests)
+- Prefer idle agents over working ones
+- Avoid agents with >80% context usage
+- For general questions or status queries, pick any idle agent
 
-2. **Availability**: Prefer idle agents over working ones
-   - If best match is busy, consider second-best idle agent
-   - Never delegate to an agent in 'error' status
-
-3. **Context Health**: Avoid agents with >80% context usage (risk of context overflow)
-
-4. **Recent Work**: Consider if an agent was recently working on related code
-   - Check lastAssignedTask and recentSupervisorSummary for relevance
-
-5. **Workload Balance**: Distribute tasks across team when possible
-
-## Response Format
-Respond with ONLY this JSON (no markdown fences):
-{
-  "selectedAgentId": "id of chosen agent",
-  "selectedAgentName": "name of chosen agent",
-  "reasoning": "2-3 sentence explanation of why this agent was chosen",
-  "alternativeAgents": ["names of other suitable agents"],
-  "confidence": "high" | "medium" | "low"
-}`;
+## Required Output Format (JSON only, no other text):
+{"selectedAgentId":"<agent id>","selectedAgentName":"<agent name>","reasoning":"<why this agent>","alternativeAgents":[],"confidence":"medium"}`;
 
 function buildDelegationPrompt(command: string, contexts: SubordinateContext[]): string {
   const subordinatesData = contexts.map(ctx => ({
@@ -393,13 +416,16 @@ async function callClaudeForDelegation(prompt: string): Promise<string> {
     log.log?.(' Spawning Claude Code for delegation analysis...');
 
     const executable = claudeBackend.getExecutablePath();
+    // Use --print mode with stream-json output - --verbose is required when using stream-json with --print
     const args = [
       '--print',
       '--verbose',
       '--output-format', 'stream-json',
       '--input-format', 'stream-json',
-      '--no-session-persistence',
+      '--dangerously-skip-permissions',
     ];
+
+    log.log?.(' Command:', executable, args.join(' '));
 
     const childProcess = spawn(executable, args, {
       env: {
@@ -421,36 +447,51 @@ async function callClaudeForDelegation(prompt: string): Promise<string> {
 
       for (const line of lines) {
         if (!line.trim()) continue;
+        log.log?.(' [delegation stdout line]:', line.substring(0, 200));
         try {
           const event = JSON.parse(line);
+          // Handle assistant event with full message content
           if (event.type === 'assistant' && event.message?.content) {
             for (const block of event.message.content) {
               if (block.type === 'text' && block.text) {
+                log.log?.(' [delegation] Got assistant text:', block.text.substring(0, 100));
                 textOutput += block.text;
               }
             }
           }
+          // Handle streaming text delta events
           if (event.type === 'stream_event' && event.event?.type === 'content_block_delta') {
             if (event.event.delta?.type === 'text_delta' && event.event.delta.text) {
               textOutput += event.event.delta.text;
             }
           }
+          // Also capture result text as fallback
+          if (event.type === 'result' && event.result && typeof event.result === 'string') {
+            log.log?.(' [delegation] Got result with text:', event.result.substring(0, 100));
+            // Only use result if we didn't get text from assistant event
+            if (!textOutput) {
+              textOutput = event.result;
+            }
+          }
         } catch {
-          // Not JSON
+          // Not JSON - could be raw text output
+          log.log?.(' [delegation] Non-JSON line:', line.substring(0, 100));
         }
       }
     });
 
     childProcess.stderr?.on('data', (data: Buffer) => {
       const text = decoder.write(data);
-      if (text.toLowerCase().includes('error')) {
-        log.error?.(' stderr:', text);
-      }
+      log.log?.(' [delegation stderr]:', text.substring(0, 200));
     });
 
     childProcess.on('close', (code) => {
+      log.log?.(' [delegation] Process closed with code:', code);
+      log.log?.(' [delegation] textOutput so far:', textOutput.substring(0, 200));
+
       const remaining = buffer + decoder.end();
       if (remaining.trim()) {
+        log.log?.(' [delegation] Processing remaining buffer:', remaining.substring(0, 200));
         try {
           const event = JSON.parse(remaining);
           if (event.type === 'assistant' && event.message?.content) {
@@ -465,6 +506,8 @@ async function callClaudeForDelegation(prompt: string): Promise<string> {
         }
       }
 
+      log.log?.(' [delegation] Final textOutput length:', textOutput.length);
+
       if (code !== 0 && textOutput.length === 0) {
         reject(new Error(`Claude Code exited with code ${code}`));
       } else if (!textOutput) {
@@ -475,10 +518,12 @@ async function callClaudeForDelegation(prompt: string): Promise<string> {
     });
 
     childProcess.on('error', (err) => {
+      log.error?.(' [delegation] Process error:', err);
       reject(err);
     });
 
     childProcess.on('spawn', () => {
+      log.log?.(' [delegation] Process spawned, sending prompt...');
       const stdinMessage = JSON.stringify({
         type: 'user',
         message: {
@@ -486,13 +531,16 @@ async function callClaudeForDelegation(prompt: string): Promise<string> {
           content: prompt,
         },
       });
+      log.log?.(' [delegation] stdin message:', stdinMessage.substring(0, 200));
       childProcess.stdin?.write(stdinMessage + '\n');
       childProcess.stdin?.end();
+      log.log?.(' [delegation] stdin closed');
     });
 
     // Timeout after 60 seconds
     setTimeout(() => {
       if (!childProcess.killed) {
+        log.log?.(' [delegation] Timeout - killing process');
         childProcess.kill('SIGTERM');
         reject(new Error('Claude Code timed out'));
       }
@@ -525,6 +573,14 @@ function parseDelegationResponse(
       jsonStr = jsonStr.slice(0, -3);
     }
     jsonStr = jsonStr.trim();
+
+    // Try to extract JSON object from response if it contains extra text
+    const jsonMatch = jsonStr.match(/\{[\s\S]*"selectedAgentId"[\s\S]*"selectedAgentName"[\s\S]*\}/);
+    if (jsonMatch) {
+      jsonStr = jsonMatch[0];
+    }
+
+    log.log?.(' [delegation] Attempting to parse JSON:', jsonStr.substring(0, 200));
 
     const parsed = JSON.parse(jsonStr);
 
@@ -568,6 +624,15 @@ export function deleteBossHistory(bossId: string): void {
   deleteDelegationHistory(delegationHistories, bossId);
   saveDelegationHistory(delegationHistories);
   log.log?.(` Deleted delegation history for boss ${bossId}`);
+}
+
+/**
+ * Add a delegation decision to history (used when boss includes delegation in response)
+ */
+export function addDelegationToHistory(bossId: string, decision: DelegationDecision): void {
+  addDelegationDecision(delegationHistories, bossId, decision);
+  saveDelegationHistory(delegationHistories);
+  log.log?.(` Added delegation decision for boss ${bossId}: ${decision.selectedAgentName}`);
 }
 
 // ============================================================================

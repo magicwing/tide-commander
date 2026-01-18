@@ -12,7 +12,7 @@ export interface InputCallbacks {
   onAgentDoubleClick: (agentId: string) => void;
   onGroundClick: () => void;
   onMoveCommand: (position: THREE.Vector3, agentIds: string[]) => void;
-  onSelectionBox: (agentIds: string[]) => void;
+  onSelectionBox: (agentIds: string[], buildingIds: string[]) => void;
   // Drawing callbacks
   onDrawStart?: (pos: { x: number; z: number }) => void;
   onDrawMove?: (pos: { x: number; z: number }) => void;
@@ -59,6 +59,11 @@ export type AreaAtPositionGetter = (pos: { x: number; z: number }) => { id: stri
 export type BuildingAtPositionGetter = (pos: { x: number; z: number }) => { id: string } | null;
 
 /**
+ * Building positions getter for drag selection.
+ */
+export type BuildingPositionsGetter = () => Map<string, THREE.Vector3>;
+
+/**
  * Handles all mouse and keyboard input for the scene.
  */
 export class InputHandler {
@@ -92,6 +97,7 @@ export class InputHandler {
 
   // Building detection and dragging
   private buildingAtPositionGetter: BuildingAtPositionGetter = () => null;
+  private buildingPositionsGetter: BuildingPositionsGetter = () => new Map();
   private isDraggingBuilding = false;
   private draggingBuildingId: string | null = null;
   private buildingDragStartPos: { x: number; z: number } | null = null;
@@ -167,6 +173,13 @@ export class InputHandler {
    */
   setBuildingAtPositionGetter(getter: BuildingAtPositionGetter): void {
     this.buildingAtPositionGetter = getter;
+  }
+
+  /**
+   * Set the building positions getter (for drag selection).
+   */
+  setBuildingPositionsGetter(getter: BuildingPositionsGetter): void {
+    this.buildingPositionsGetter = getter;
   }
 
   /**
@@ -703,7 +716,9 @@ export class InputHandler {
     const boxBottom = Math.max(start.y, end.y);
 
     const agentsInBox: string[] = [];
+    const buildingsInBox: string[] = [];
 
+    // Check agents
     for (const [agentId, meshData] of this.agentMeshes) {
       const screenPos = meshData.group.position.clone().project(this.camera);
       const screenX = ((screenPos.x + 1) / 2) * rect.width + rect.left;
@@ -719,7 +734,24 @@ export class InputHandler {
       }
     }
 
-    this.callbacks.onSelectionBox(agentsInBox);
+    // Check buildings
+    const buildingPositions = this.buildingPositionsGetter();
+    for (const [buildingId, position] of buildingPositions) {
+      const screenPos = position.clone().project(this.camera);
+      const screenX = ((screenPos.x + 1) / 2) * rect.width + rect.left;
+      const screenY = ((-screenPos.y + 1) / 2) * rect.height + rect.top;
+
+      if (
+        screenX >= boxLeft &&
+        screenX <= boxRight &&
+        screenY >= boxTop &&
+        screenY <= boxBottom
+      ) {
+        buildingsInBox.push(buildingId);
+      }
+    }
+
+    this.callbacks.onSelectionBox(agentsInBox, buildingsInBox);
   }
 
   private updateMouse(event: MouseEvent): void {

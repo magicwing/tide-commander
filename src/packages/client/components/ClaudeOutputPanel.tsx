@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useStore, store, ClaudeOutput } from '../store';
 import type { Agent, AgentAnalysis, PermissionRequest } from '../../shared/types';
+import { BOSS_CONTEXT_START, BOSS_CONTEXT_END } from '../../shared/types';
 import { AGENT_CLASS_CONFIG } from '../scene/config';
 import { formatIdleTime, getIdleTimerColor, filterCostText } from '../utils/formatting';
 
@@ -26,6 +27,10 @@ interface AttachedFile {
   isImage: boolean;
   size: number;
 }
+
+// View modes for the terminal: 'simple' shows tools, 'chat' shows only user/final responses, 'advanced' shows everything
+type ViewMode = 'simple' | 'chat' | 'advanced';
+const VIEW_MODES: ViewMode[] = ['simple', 'chat', 'advanced'];
 
 // Constants for virtualization
 const MESSAGES_PER_PAGE = 30;
@@ -99,6 +104,246 @@ function isSimpleViewOutput(text: string): boolean {
   return true;
 }
 
+// Helper to determine if output should be shown in chat view (only user messages and final responses)
+// This aggressively filters out intermediate reasoning/planning messages
+function isChatViewOutput(text: string): boolean {
+  // HIDE all tool-related messages
+  if (text.startsWith('Using tool:')) return false;
+  if (text.startsWith('Tool input:')) return false;
+  if (text.startsWith('Tool result:')) return false;
+
+  // HIDE stats and system messages
+  if (text.startsWith('Tokens:')) return false;
+  if (text.startsWith('Cost:')) return false;
+  if (text.startsWith('[thinking]')) return false;
+  if (text.startsWith('[raw]')) return false;
+  if (text.startsWith('Session started:')) return false;
+  if (text.startsWith('Session initialized')) return false;
+
+  // HIDE raw JSON tool parameters
+  const trimmed = text.trim();
+  if (trimmed.startsWith('{')) {
+    const toolParamKeys = [
+      '"file_path"', '"command"', '"pattern"', '"path"', '"content"',
+      '"old_string"', '"new_string"', '"query"', '"url"', '"prompt"',
+      '"notebook_path"', '"description"', '"offset"', '"limit"'
+    ];
+    if (toolParamKeys.some(key => trimmed.includes(key))) {
+      return false;
+    }
+  }
+
+  // HIDE intermediate reasoning/planning messages (common patterns)
+  const intermediatePatterns = [
+    /^(let me|i'll|i will|now i|first,? i|i need to|i should|i'm going to)/i,
+    /^(looking at|reading|checking|searching|exploring|examining|investigating)/i,
+    /^(based on|from what|according to|it (looks|seems|appears))/i,
+    /^(this (shows|indicates|suggests|means|is))/i,
+    /^(the (code|file|function|class|component|implementation))/i,
+    /^(now (let|i))/i,
+  ];
+
+  if (intermediatePatterns.some(pattern => pattern.test(trimmed))) {
+    return false;
+  }
+
+  // SHOW only what appears to be final responses (summaries, answers, etc.)
+  return true;
+}
+
+// Helper to parse boss context from content
+interface ParsedBossContent {
+  hasContext: boolean;
+  context: string | null;
+  userMessage: string;
+}
+
+function parseBossContext(content: string): ParsedBossContent {
+  const startIdx = content.indexOf(BOSS_CONTEXT_START);
+  const endIdx = content.indexOf(BOSS_CONTEXT_END);
+
+  if (startIdx === -1 || endIdx === -1 || startIdx >= endIdx) {
+    return { hasContext: false, context: null, userMessage: content };
+  }
+
+  const context = content.slice(startIdx + BOSS_CONTEXT_START.length, endIdx).trim();
+  const userMessage = content.slice(endIdx + BOSS_CONTEXT_END.length).trim();
+
+  return { hasContext: true, context, userMessage };
+}
+
+// Component for collapsible boss context
+interface BossContextProps {
+  context: string;
+  defaultCollapsed?: boolean;
+}
+
+function BossContext({ context, defaultCollapsed = true }: BossContextProps) {
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
+
+  // Extract agent count from the "# YOUR TEAM (N agents)" header
+  const teamMatch = context.match(/# YOUR TEAM \((\d+) agents?\)/);
+  const agentCount = teamMatch ? parseInt(teamMatch[1], 10) : 0;
+
+  return (
+    <div className={`boss-context ${collapsed ? 'collapsed' : 'expanded'}`}>
+      <div className="boss-context-header" onClick={() => setCollapsed(!collapsed)}>
+        <span className="boss-context-icon">👑</span>
+        <span className="boss-context-label">
+          Team Context ({agentCount} agent{agentCount !== 1 ? 's' : ''})
+        </span>
+        <span className="boss-context-toggle">{collapsed ? '▶' : '▼'}</span>
+      </div>
+      {!collapsed && (
+        <div className="boss-context-content">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{context}</ReactMarkdown>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Delegation Block Parsing and Display
+// ============================================================================
+
+interface ParsedDelegation {
+  selectedAgentId: string;
+  selectedAgentName: string;
+  taskCommand: string;
+  reasoning: string;
+  alternativeAgents: Array<{ id: string; name: string; reason?: string }>;
+  confidence: 'high' | 'medium' | 'low';
+}
+
+interface ParsedBossResponse {
+  hasDelegation: boolean;
+  delegations: ParsedDelegation[];  // Now supports multiple delegations
+  contentWithoutBlock: string;  // Response text with the ```delegation block removed
+}
+
+function parseDelegationBlock(content: string): ParsedBossResponse {
+  // Match ```delegation\n[...]\n``` or ```delegation\n{...}\n``` block
+  const delegationMatch = content.match(/```delegation\s*\n([\s\S]*?)\n```/);
+
+  if (!delegationMatch) {
+    return { hasDelegation: false, delegations: [], contentWithoutBlock: content };
+  }
+
+  try {
+    const parsed = JSON.parse(delegationMatch[1].trim());
+
+    // Support both array and single object format
+    const delegationArray = Array.isArray(parsed) ? parsed : [parsed];
+
+    const delegations: ParsedDelegation[] = delegationArray.map(delegationJson => ({
+      selectedAgentId: delegationJson.selectedAgentId || '',
+      selectedAgentName: delegationJson.selectedAgentName || 'Unknown',
+      taskCommand: delegationJson.taskCommand || '',
+      reasoning: delegationJson.reasoning || '',
+      alternativeAgents: delegationJson.alternativeAgents || [],
+      confidence: delegationJson.confidence || 'medium',
+    }));
+
+    // Remove the delegation block from the content
+    const contentWithoutBlock = content.replace(/```delegation\s*\n[\s\S]*?\n```/, '').trim();
+
+    return { hasDelegation: true, delegations, contentWithoutBlock };
+  } catch {
+    // Failed to parse JSON, return as-is
+    return { hasDelegation: false, delegations: [], contentWithoutBlock: content };
+  }
+}
+
+interface DelegationBlockProps {
+  delegation: ParsedDelegation;
+}
+
+function DelegationBlock({ delegation }: DelegationBlockProps) {
+  const confidenceColors: Record<string, string> = {
+    high: '#22c55e',    // green
+    medium: '#f59e0b',  // amber
+    low: '#ef4444',     // red
+  };
+
+  const confidenceEmoji: Record<string, string> = {
+    high: '✅',
+    medium: '⚠️',
+    low: '❓',
+  };
+
+  return (
+    <div className="delegation-block">
+      <div className="delegation-header">
+        <span className="delegation-icon">📨</span>
+        <span className="delegation-title">Task Delegated</span>
+        <span
+          className="delegation-confidence"
+          style={{ color: confidenceColors[delegation.confidence] }}
+        >
+          {confidenceEmoji[delegation.confidence]} {delegation.confidence}
+        </span>
+      </div>
+      <div className="delegation-details">
+        <div className="delegation-target">
+          <span className="delegation-label">To:</span>
+          <span className="delegation-agent-name">{delegation.selectedAgentName}</span>
+        </div>
+        {delegation.taskCommand && (
+          <div className="delegation-task-command">
+            <span className="delegation-label">Task:</span>
+            <span className="delegation-command-text">{delegation.taskCommand}</span>
+          </div>
+        )}
+        {delegation.reasoning && (
+          <div className="delegation-reasoning">
+            <span className="delegation-label">Why:</span>
+            <span className="delegation-reason-text">{delegation.reasoning}</span>
+          </div>
+        )}
+        {delegation.alternativeAgents.length > 0 && (
+          <div className="delegation-alternatives">
+            <span className="delegation-label">Alternatives:</span>
+            <span className="delegation-alt-list">
+              {delegation.alternativeAgents.map((alt, i) => (
+                <span key={alt.id || i} className="delegation-alt-agent">
+                  {alt.name}{alt.reason ? ` (${alt.reason})` : ''}
+                </span>
+              ))}
+            </span>
+          </div>
+        )}
+      </div>
+      <div className="delegation-footer">
+        <span className="delegation-auto-forward">↗️ Auto-forwarding to {delegation.selectedAgentName}...</span>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Delegated Task Header (shown when an agent receives a task from a boss)
+// ============================================================================
+
+interface DelegatedTaskHeaderProps {
+  bossName: string;
+  taskCommand: string;
+}
+
+function DelegatedTaskHeader({ bossName, taskCommand }: DelegatedTaskHeaderProps) {
+  return (
+    <div className="delegated-task-header">
+      <div className="delegated-task-badge">
+        <span className="delegated-task-icon">👑</span>
+        <span className="delegated-task-label">Delegated from <strong>{bossName}</strong></span>
+      </div>
+      <div className="delegated-task-command">
+        {taskCommand}
+      </div>
+    </div>
+  );
+}
+
 export function ClaudeOutputPanel() {
   const state = useStore();
   const outputRef = useRef<HTMLDivElement>(null);
@@ -113,9 +358,15 @@ export function ClaudeOutputPanel() {
   const isUserScrolledUpRef = useRef(false);
   // Per-agent input state
   const [agentCommands, setAgentCommands] = useState<Map<string, string>>(new Map());
-  const [advancedView, setAdvancedView] = useState(() => {
-    const saved = localStorage.getItem('guake-advanced-view');
-    return saved === 'true';
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    const saved = localStorage.getItem('guake-view-mode');
+    if (saved === 'simple' || saved === 'chat' || saved === 'advanced') {
+      return saved;
+    }
+    // Migrate from old boolean setting
+    const oldSaved = localStorage.getItem('guake-advanced-view');
+    if (oldSaved === 'true') return 'advanced';
+    return 'simple';
   });
   const [agentForceTextarea, setAgentForceTextarea] = useState<Map<string, boolean>>(new Map());
   const [agentPastedTexts, setAgentPastedTexts] = useState<Map<string, Map<number, string>>>(new Map());
@@ -126,6 +377,8 @@ export function ClaudeOutputPanel() {
   const [searchLoading, setSearchLoading] = useState(false);
   // Image modal state
   const [imageModal, setImageModal] = useState<{ url: string; name: string } | null>(null);
+  // Context action confirmation modal
+  const [contextConfirm, setContextConfirm] = useState<'collapse' | 'clear' | null>(null);
   const agentPastedCountRef = useRef<Map<string, number>>(new Map());
   const fileCountRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -789,15 +1042,20 @@ export function ClaudeOutputPanel() {
               🔍
             </button>
             <button
-              className={`guake-view-toggle ${advancedView ? 'active' : ''}`}
+              className={`guake-view-toggle ${viewMode !== 'simple' ? 'active' : ''} view-mode-${viewMode}`}
               onClick={() => {
-                const newValue = !advancedView;
-                setAdvancedView(newValue);
-                localStorage.setItem('guake-advanced-view', String(newValue));
+                const currentIndex = VIEW_MODES.indexOf(viewMode);
+                const nextMode = VIEW_MODES[(currentIndex + 1) % VIEW_MODES.length];
+                setViewMode(nextMode);
+                localStorage.setItem('guake-view-mode', nextMode);
               }}
-              title={advancedView ? 'Show simple view' : 'Show advanced view'}
+              title={
+                viewMode === 'simple' ? 'Simple: Shows tools and responses' :
+                viewMode === 'chat' ? 'Chat: Shows only user messages and final responses' :
+                'Advanced: Shows all details including tool inputs/outputs'
+              }
             >
-              {advancedView ? '◉ Advanced' : '○ Simple'}
+              {viewMode === 'simple' ? '○ Simple' : viewMode === 'chat' ? '◐ Chat' : '◉ Advanced'}
             </button>
             {outputs.length > 0 && (
               <button
@@ -808,6 +1066,21 @@ export function ClaudeOutputPanel() {
                 Clear
               </button>
             )}
+            <button
+              className="guake-context-btn"
+              onClick={() => setContextConfirm('collapse')}
+              title="Collapse context - summarize conversation to save tokens"
+              disabled={selectedAgent.status !== 'idle'}
+            >
+              📦 Collapse
+            </button>
+            <button
+              className="guake-context-btn danger"
+              onClick={() => setContextConfirm('clear')}
+              title="Clear context - start fresh session"
+            >
+              🗑️ Clear Context
+            </button>
             <span className="guake-hint">Press ` to toggle</span>
           </div>
         </div>
@@ -873,12 +1146,27 @@ export function ClaudeOutputPanel() {
                 </div>
               )}
               {history
-                .filter(msg => advancedView || msg.type === 'user' || msg.type === 'assistant' || msg.type === 'tool_use')
+                .filter((msg, index, arr) => {
+                  if (viewMode === 'advanced') return true;
+                  if (viewMode === 'chat') {
+                    // Only show user messages and the LAST assistant message before each user message
+                    if (msg.type === 'user') return true;
+                    if (msg.type === 'assistant') {
+                      // Check if this is the last assistant message before a user message or end of array
+                      const nextMsg = arr[index + 1];
+                      // Show if next message is user, or this is the last message
+                      return !nextMsg || nextMsg.type === 'user';
+                    }
+                    return false;
+                  }
+                  // simple mode
+                  return msg.type === 'user' || msg.type === 'assistant' || msg.type === 'tool_use';
+                })
                 .map((msg, index) => (
                   <HistoryLine
                     key={`h-${index}`}
                     message={msg}
-                    simpleView={!advancedView}
+                    simpleView={viewMode !== 'advanced'}
                     onImageClick={(url, name) => setImageModal({ url, name })}
                     onFileClick={(path) => {
                       // Open file in FileExplorerPanel by setting the path
@@ -890,11 +1178,18 @@ export function ClaudeOutputPanel() {
                 <div className="output-separator">--- Live Output ---</div>
               )}
               {outputs
-                .filter(output => advancedView || output.isUserPrompt || isSimpleViewOutput(output.text))
+                .filter(output => {
+                  if (viewMode === 'advanced') return true;
+                  if (output.isUserPrompt) return true;
+                  if (viewMode === 'chat') return isChatViewOutput(output.text);
+                  // simple mode
+                  return isSimpleViewOutput(output.text);
+                })
                 .map((output, index) => (
                   <OutputLine
                     key={`o-${index}`}
                     output={output}
+                    agentId={selectedAgentId}
                     onImageClick={(url, name) => setImageModal({ url, name })}
                     onFileClick={(path) => store.setFileViewerPath(path)}
                   />
@@ -1080,6 +1375,56 @@ export function ClaudeOutputPanel() {
             </div>
             <div className="image-modal-content">
               <img src={imageModal.url} alt={imageModal.name} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Context Action Confirmation Modal */}
+      {contextConfirm && (
+        <div className="modal-overlay visible" onClick={() => setContextConfirm(null)}>
+          <div className="modal confirm-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              {contextConfirm === 'collapse' ? 'Collapse Context' : 'Clear Context'}
+            </div>
+            <div className="modal-body confirm-modal-body">
+              {contextConfirm === 'collapse' ? (
+                <>
+                  <p>Collapse the conversation context?</p>
+                  <p className="confirm-modal-note">
+                    This will summarize the conversation to save tokens while preserving important information.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p>Clear all context for this agent?</p>
+                  <p className="confirm-modal-note">
+                    This will start a fresh session on the next command. All conversation history will be lost.
+                  </p>
+                </>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setContextConfirm(null)}>
+                Cancel
+              </button>
+              <button
+                className={`btn ${contextConfirm === 'clear' ? 'btn-danger' : 'btn-primary'}`}
+                onClick={() => {
+                  if (selectedAgentId) {
+                    if (contextConfirm === 'collapse') {
+                      store.collapseContext(selectedAgentId);
+                    } else {
+                      store.clearContext(selectedAgentId);
+                      setHistory([]);
+                    }
+                  }
+                  setContextConfirm(null);
+                }}
+                autoFocus
+              >
+                {contextConfirm === 'collapse' ? 'Collapse' : 'Clear Context'}
+              </button>
             </div>
           </div>
         </div>
@@ -1434,10 +1779,17 @@ function HistoryLine({ message, highlight, simpleView, onImageClick, onFileClick
   const { type, content: rawContent, toolName } = message;
   const content = filterCostText(rawContent, hideCost);
 
+  // For user messages, parse boss context BEFORE truncation
+  // The boss context can be very long, so we need to extract it first
+  const parsedBoss = type === 'user' ? parseBossContext(content) : null;
+
   // Truncate long messages (but not for Edit tool - we want full diff)
+  // For user messages with boss context, only truncate the user message part
   const truncatedContent = toolName === 'Edit'
     ? content
-    : (content.length > 2000 ? content.substring(0, 2000) + '...' : content);
+    : parsedBoss?.hasContext
+      ? content // Keep full content for boss messages (context is collapsible)
+      : (content.length > 2000 ? content.substring(0, 2000) + '...' : content);
 
   if (type === 'tool_use') {
     const icon = TOOL_ICONS[toolName || ''] || TOOL_ICONS.default;
@@ -1511,9 +1863,53 @@ function HistoryLine({ message, highlight, simpleView, onImageClick, onFileClick
   const isUser = type === 'user';
   const className = isUser ? 'history-line history-user' : 'history-line history-assistant';
 
+  // For user messages, check for boss context (use pre-parsed result)
+  if (isUser && parsedBoss) {
+    // Truncate only the user message part if needed
+    const displayMessage = parsedBoss.userMessage.length > 2000
+      ? parsedBoss.userMessage.substring(0, 2000) + '...'
+      : parsedBoss.userMessage;
+
+    return (
+      <div className={className}>
+        <span className="history-role">You</span>
+        <span className="history-content markdown-content">
+          {parsedBoss.hasContext && parsedBoss.context && (
+            <BossContext context={parsedBoss.context} />
+          )}
+          {highlight ? (
+            <div>{highlightText(displayMessage, highlight)}</div>
+          ) : (
+            renderContentWithImages(displayMessage, onImageClick)
+          )}
+        </span>
+      </div>
+    );
+  }
+
+  // For assistant messages, check for delegation blocks
+  const delegationParsed = parseDelegationBlock(truncatedContent);
+  if (delegationParsed.hasDelegation && delegationParsed.delegations.length > 0) {
+    return (
+      <div className={className}>
+        <span className="history-role">Claude</span>
+        <span className="history-content markdown-content">
+          {highlight ? (
+            <div>{highlightText(delegationParsed.contentWithoutBlock, highlight)}</div>
+          ) : (
+            renderContentWithImages(delegationParsed.contentWithoutBlock, onImageClick)
+          )}
+          {delegationParsed.delegations.map((delegation, i) => (
+            <DelegationBlock key={`del-${i}`} delegation={delegation} />
+          ))}
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div className={className}>
-      <span className="history-role">{isUser ? 'You' : 'Claude'}</span>
+      <span className="history-role">Claude</span>
       <span className="history-content markdown-content">
         {highlight ? (
           <div>{highlightText(truncatedContent, highlight)}</div>
@@ -1527,22 +1923,40 @@ function HistoryLine({ message, highlight, simpleView, onImageClick, onFileClick
 
 interface OutputLineProps {
   output: ClaudeOutput;
+  agentId: string | null;
   onImageClick?: (url: string, name: string) => void;
   onFileClick?: (path: string) => void;
 }
 
-function OutputLine({ output, onImageClick, onFileClick }: OutputLineProps) {
+function OutputLine({ output, agentId, onImageClick, onFileClick }: OutputLineProps) {
   const state = useStore();
   const hideCost = state.settings.hideCost;
   const { text: rawText, isStreaming, isUserPrompt } = output;
   const text = filterCostText(rawText, hideCost);
 
+  // Check if this agent has a pending delegated task
+  const delegation = agentId ? store.getLastDelegationReceived(agentId) : null;
+
   // Handle user prompts separately
   if (isUserPrompt) {
+    const parsed = parseBossContext(text);
+
+    // Check if this user prompt matches a delegated task (text matches taskCommand)
+    const isDelegatedTask = delegation && text.trim() === delegation.taskCommand.trim();
+
     return (
       <div className="output-line output-user">
-        <span className="output-role">You</span>
-        {renderContentWithImages(text, onImageClick)}
+        {isDelegatedTask ? (
+          <DelegatedTaskHeader bossName={delegation.bossName} taskCommand={delegation.taskCommand} />
+        ) : (
+          <>
+            <span className="output-role">You</span>
+            {parsed.hasContext && parsed.context && (
+              <BossContext context={parsed.context} />
+            )}
+            {renderContentWithImages(parsed.userMessage, onImageClick)}
+          </>
+        )}
       </div>
     );
   }
@@ -1630,6 +2044,22 @@ function OutputLine({ output, onImageClick, onFileClick }: OutputLineProps) {
 
   if (isStreaming) {
     className += ' output-streaming';
+  }
+
+  // For Claude messages, check for delegation blocks
+  if (isClaudeMessage && !isStreaming) {
+    const parsed = parseDelegationBlock(text);
+    if (parsed.hasDelegation && parsed.delegations.length > 0) {
+      return (
+        <div className={className}>
+          <span className="output-role">Claude</span>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{parsed.contentWithoutBlock}</ReactMarkdown>
+          {parsed.delegations.map((delegation, i) => (
+            <DelegationBlock key={`del-${i}`} delegation={delegation} />
+          ))}
+        </div>
+      );
+    }
   }
 
   return (

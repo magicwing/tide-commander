@@ -7,8 +7,10 @@ import { Server as HttpServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import * as fs from 'fs';
 import type { Agent, ClientMessage, ServerMessage, DrawingArea, Building, PermissionRequest, DelegationDecision } from '../../shared/types.js';
+import { BOSS_CONTEXT_START, BOSS_CONTEXT_END } from '../../shared/types.js';
 import { agentService, claudeService, supervisorService, permissionService, bossService } from '../services/index.js';
 import { loadAreas, saveAreas, loadBuildings, saveBuildings } from '../data/index.js';
+import { loadSession, loadToolHistory } from '../claude/session-loader.js';
 import { logger, createLogger } from '../utils/logger.js';
 
 const log = logger.ws;
@@ -16,6 +18,9 @@ const supervisorLog = createLogger('Supervisor');
 
 // Connected clients
 const clients = new Set<WebSocket>();
+
+// Track last command sent to each boss agent (for delegation parsing)
+const lastBossCommands = new Map<string, string>();
 
 // ============================================================================
 // Broadcasting
@@ -41,6 +46,37 @@ function sendActivity(agentId: string, message: string): void {
       timestamp: Date.now(),
     },
   });
+}
+
+/**
+ * Unlink an agent from boss hierarchy before deletion.
+ * If agent is a subordinate, remove from their boss.
+ * If agent is a boss, unlink all their subordinates.
+ */
+function unlinkAgentFromBossHierarchy(agentId: string): void {
+  const agent = agentService.getAgent(agentId);
+  if (!agent) return;
+
+  // If this agent has a boss, remove from boss's subordinate list
+  if (agent.bossId) {
+    try {
+      bossService.removeSubordinate(agent.bossId, agentId);
+    } catch (err) {
+      log.error(` Failed to unlink from boss: ${err}`);
+    }
+  }
+
+  // If this agent is a boss, unlink all subordinates
+  if (agent.class === 'boss' && agent.subordinateIds?.length) {
+    for (const subId of agent.subordinateIds) {
+      try {
+        // Clear the bossId from subordinate
+        agentService.updateAgent(subId, { bossId: undefined });
+      } catch (err) {
+        log.error(` Failed to unlink subordinate ${subId}: ${err}`);
+      }
+    }
+  }
 }
 
 // ============================================================================
@@ -99,68 +135,36 @@ function handleClientMessage(ws: WebSocket, message: ClientMessage): void {
         const { agentId, command } = message.payload;
         const agent = agentService.getAgent(agentId);
 
-        // If this is a boss agent, enhance the command with subordinate context
+        // If this is a boss agent, handle differently based on command type
         if (agent?.class === 'boss') {
-          // Check if this looks like a delegation request (action command vs question)
-          const isQuestion = /^(what|who|how|why|where|when|which|tell me|show|list|status|report)/i.test(command.trim());
+          log.log(` Boss ${agent.name} received command: "${command.slice(0, 50)}..."`);
 
-          if (!isQuestion) {
-            // This looks like a task - route through delegation system
-            log.log(` Boss ${agent.name} received task command, routing to delegation`);
+          // Track the last command sent to this boss (for delegation parsing)
+          lastBossCommands.set(agentId, command);
 
-            // Check if boss has subordinates
-            const subordinates = bossService.getSubordinates(agentId);
-            if (subordinates.length === 0) {
-              // No subordinates - boss handles it directly with context
-              buildBossContext(agentId, agent.name, command)
-                .then((enhancedCommand) => {
-                  claudeService.sendCommand(agentId, enhancedCommand);
-                })
-                .catch(() => {
-                  claudeService.sendCommand(agentId, command);
-                });
-            } else {
-              // Has subordinates - delegate the task
-              bossService
-                .delegateCommand(agentId, command)
-                .then((decision) => {
-                  // Notify boss about the delegation
-                  sendActivity(agentId, `Delegating to ${decision.selectedAgentName}: ${decision.reasoning}`);
+          // Detect if this is a team/status question vs a coding task
+          // Team questions: status, what are they doing, subordinates, team, report, etc.
+          const isTeamQuestion = /\b(subordinat|team|equipo|status|estado|hacen|doing|trabajando|working|progress|reporte|report|agentes|agents|chavos|who are you|hello|hola|hi\b)\b/i.test(command);
 
-                  // Send the command to the selected subordinate
-                  claudeService
-                    .sendCommand(decision.selectedAgentId, command)
-                    .then(() => {
-                      sendActivity(decision.selectedAgentId, `Task from boss: ${command.slice(0, 50)}...`);
-                    })
-                    .catch((err) => {
-                      log.error(' Failed to send delegated command:', err);
-                      sendActivity(agentId, `Delegation failed: ${err.message}`);
-                    });
-                })
-                .catch((err) => {
-                  log.error(' Delegation failed:', err);
-                  sendActivity(agentId, `Delegation error: ${err.message}`);
-                  // Fall back to sending directly to boss with context
-                  buildBossContext(agentId, agent.name, command)
-                    .then((enhancedCommand) => {
-                      claudeService.sendCommand(agentId, enhancedCommand);
-                    })
-                    .catch(() => {
-                      claudeService.sendCommand(agentId, command);
-                    });
-                });
-            }
+          // Boss agents get context injected in the user message with delimiters
+          // Instructions go via system prompt, context is in the message for visibility
+          buildBossMessage(agentId, command)
+            .then(({ message: bossMessage, systemPrompt }) => {
+              const disableTools = isTeamQuestion; // Disable tools for team questions
+              // ALWAYS force new session for boss - boss needs fresh context each time
+              const forceNewSession = true;
+              log.log(` Boss ${agent.name}: forceNewSession=true, disableTools=${disableTools}`);
+              claudeService.sendCommand(agentId, bossMessage, systemPrompt, disableTools, forceNewSession);
+            })
+            .catch((err) => {
+              log.error(` Boss ${agent.name}: failed to build boss message:`, err);
+              claudeService.sendCommand(agentId, command);
+            });
+
+          if (isTeamQuestion) {
+            log.log(` Boss ${agent.name}: detected team question, boss will answer directly (tools disabled)`);
           } else {
-            // This is a question - enhance with full subordinate context including supervisor history
-            buildBossContext(agentId, agent.name, command)
-              .then((enhancedCommand) => {
-                claudeService.sendCommand(agentId, enhancedCommand);
-              })
-              .catch(() => {
-                // Fall back to sending without context
-                claudeService.sendCommand(agentId, command);
-              });
+            log.log(` Boss ${agent.name}: detected coding task, delegation will be in response`);
           }
         } else {
           // Regular agent - send command directly
@@ -183,6 +187,8 @@ function handleClientMessage(ws: WebSocket, message: ClientMessage): void {
 
     case 'kill_agent':
       claudeService.stopAgent(message.payload.agentId).then(() => {
+        // Unlink from boss/subordinates before deleting
+        unlinkAgentFromBossHierarchy(message.payload.agentId);
         agentService.deleteAgent(message.payload.agentId);
       });
       break;
@@ -199,7 +205,42 @@ function handleClientMessage(ws: WebSocket, message: ClientMessage): void {
       });
       break;
 
+    case 'clear_context':
+      // Clear agent's context - force new session on next command
+      claudeService.stopAgent(message.payload.agentId).then(() => {
+        agentService.updateAgent(message.payload.agentId, {
+          status: 'idle',
+          currentTask: undefined,
+          currentTool: undefined,
+          sessionId: undefined, // Clear session to force new one
+          tokensUsed: 0,
+          contextUsed: 0,
+        });
+        sendActivity(message.payload.agentId, 'Context cleared - new session on next command');
+      });
+      break;
+
+    case 'collapse_context':
+      // Collapse context - send /compact command to Claude
+      {
+        const agent = agentService.getAgent(message.payload.agentId);
+        if (agent && agent.status === 'idle') {
+          // Send the /compact command which tells Claude to summarize context
+          claudeService.sendCommand(message.payload.agentId, '/compact').then(() => {
+            sendActivity(message.payload.agentId, 'Context collapse initiated');
+          }).catch(err => {
+            log.error(` Failed to collapse context: ${err}`);
+            sendActivity(message.payload.agentId, 'Failed to collapse context');
+          });
+        } else {
+          sendActivity(message.payload.agentId, 'Cannot collapse context while agent is busy');
+        }
+      }
+      break;
+
     case 'remove_agent':
+      // Unlink from boss/subordinates before deleting
+      unlinkAgentFromBossHierarchy(message.payload.agentId);
       // Remove from persistence only (keeps Claude session running)
       agentService.deleteAgent(message.payload.agentId);
       break;
@@ -705,120 +746,300 @@ function truncate(str: string | undefined | null, maxLen: number): string | null
 }
 
 // ============================================================================
-// Boss Context Builder
+// Boss System Prompt Builder
 // ============================================================================
 
 /**
- * Build comprehensive context for boss agent including:
- * - Subordinate status and current tasks
- * - Supervisor history for each subordinate
- * - Working directories and responsibilities
+ * Build the context portion for boss agent (injected into user message).
+ * This includes subordinate status, tasks, and supervisor history.
+ * Returns null if no subordinates are assigned.
  */
-async function buildBossContext(bossId: string, bossName: string, userCommand: string): Promise<string> {
+async function buildBossContext(bossId: string): Promise<string | null> {
   const contexts = await bossService.gatherSubordinateContext(bossId);
   const subordinates = bossService.getSubordinates(bossId);
 
   if (contexts.length === 0) {
-    return `[BOSS AGENT CONTEXT]
-You are "${bossName}", a Boss Agent in Tide Commander.
-
-ROLE: You are a team coordinator and task router. Your job is to:
-1. Understand your team's capabilities and current work
-2. Route incoming tasks to the most appropriate subordinate
-3. Monitor team progress and provide status updates
-4. Coordinate work across multiple agents when needed
-
-CURRENT TEAM: No subordinates assigned yet.
-
-To be effective, you need subordinate agents assigned to your team. Ask the user to assign agents to you.
-
-USER MESSAGE: ${userCommand}`;
+    return null;
   }
 
-  // Build detailed subordinate info with supervisor history
+  // Build detailed subordinate info with session history and supervisor analysis
   const subordinateDetails = await Promise.all(contexts.map(async (ctx, i) => {
     const sub = subordinates[i];
     const history = supervisorService.getAgentSupervisorHistory(ctx.id);
-    const latestAnalysis = history.entries[0]?.analysis;
 
     // Get working directory
     const cwd = sub?.cwd || 'Unknown';
 
-    // Build supervisor summary
-    let supervisorSummary = 'No supervisor analysis yet.';
-    if (latestAnalysis) {
-      const parts = [];
-      if (latestAnalysis.recentWorkSummary) {
-        parts.push(`Recent work: ${latestAnalysis.recentWorkSummary}`);
-      }
-      if (latestAnalysis.currentFocus) {
-        parts.push(`Focus: ${latestAnalysis.currentFocus}`);
-      }
-      if (latestAnalysis.suggestions && latestAnalysis.suggestions.length > 0) {
-        parts.push(`Suggestions: ${latestAnalysis.suggestions.slice(0, 2).join('; ')}`);
-      }
-      if (parts.length > 0) {
-        supervisorSummary = parts.join(' | ');
+    // Get last assigned task with time
+    const lastTask = ctx.lastAssignedTask || sub?.lastAssignedTask;
+    const lastTaskTime = sub?.lastAssignedTaskTime;
+    let lastTaskInfo = 'None';
+    if (lastTask) {
+      const timeSince = lastTaskTime ? formatTimeSince(lastTaskTime) : '';
+      lastTaskInfo = `"${truncate(lastTask, 200)}"${timeSince ? ` (${timeSince} ago)` : ''}`;
+    }
+
+    // Calculate idle time
+    const idleTime = sub ? formatTimeSince(sub.lastActivity) : 'Unknown';
+
+    // Get latest analysis summary
+    const latestAnalysis = history.entries[0]?.analysis;
+    const statusDesc = latestAnalysis?.statusDescription || ctx.status;
+
+    // Load recent conversation and file changes from session
+    let conversationSection = '';
+    let fileChangesSection = '';
+    if (sub?.sessionId) {
+      try {
+        // Load conversation
+        const session = await loadSession(sub.cwd, sub.sessionId, 10);
+        if (session && session.messages.length > 0) {
+          const recentMessages = session.messages.slice(-6); // Last 6 messages
+          const conversationLines = recentMessages.map(msg => {
+            const role = msg.type === 'user' ? '👤 User' :
+                        msg.type === 'assistant' ? '🤖 Claude' :
+                        msg.type === 'tool_use' ? `🔧 Tool: ${msg.toolName}` :
+                        '📤 Result';
+            const content = truncate(msg.content, 120) || '(empty)';
+            return `  - **${role}**: ${content}`;
+          });
+          conversationSection = `\n### Recent Conversation:\n${conversationLines.join('\n')}`;
+        }
+
+        // Load file changes (last 20 files)
+        const { fileChanges } = await loadToolHistory(sub.cwd, sub.sessionId, sub.id, sub.name, 20);
+        if (fileChanges.length > 0) {
+          const fileLines = fileChanges.map(fc => {
+            const actionIcon = fc.action === 'created' ? '✨' :
+                              fc.action === 'modified' ? '📝' :
+                              fc.action === 'deleted' ? '🗑️' :
+                              fc.action === 'read' ? '📖' : '📄';
+            const timeSince = formatTimeSince(fc.timestamp);
+            // Shorten the file path for display
+            const shortPath = fc.filePath.length > 60
+              ? '...' + fc.filePath.slice(-57)
+              : fc.filePath;
+            return `  - ${actionIcon} \`${shortPath}\` (${timeSince} ago)`;
+          });
+          fileChangesSection = `\n### File History (Last ${fileChanges.length}):\n${fileLines.join('\n')}`;
+        }
+      } catch (err) {
+        // Silently ignore session loading errors
       }
     }
 
-    // Get last assigned task
-    const lastTask = ctx.lastAssignedTask || sub?.lastAssignedTask || 'None';
+    // Build supervisor status updates (last 3 with FULL details like in Supervisor Status panel)
+    let supervisorUpdates = '';
+    if (history.entries && history.entries.length > 0) {
+      const updates = history.entries.slice(0, 3).map((entry) => {
+        const analysis = entry.analysis;
+        const timeSince = formatTimeSince(entry.timestamp);
+        const progress = analysis?.progress || 'unknown';
+        const progressEmoji = progress === 'on_track' ? '🟢' :
+                             progress === 'completed' ? '✅' :
+                             progress === 'idle' ? '💤' :
+                             progress === 'stalled' ? '🟡' :
+                             progress === 'blocked' ? '🔴' : '⚪';
 
-    return `
-## ${ctx.name} (${ctx.class})
-- **Status**: ${ctx.status}
-- **Current Task**: ${ctx.currentTask || 'None'}
-- **Last Assigned Task**: ${lastTask}
+        const lines: string[] = [];
+        lines.push(`#### ${progressEmoji} [${timeSince} ago] ${analysis?.statusDescription || 'No status'}`);
+
+        // Add the detailed work summary
+        if (analysis?.recentWorkSummary) {
+          lines.push(`> 📝 ${analysis.recentWorkSummary}`);
+        }
+
+        // Add current focus if different from status
+        if (analysis?.currentFocus && analysis.currentFocus !== analysis.statusDescription) {
+          lines.push(`> 🎯 **Focus**: ${analysis.currentFocus}`);
+        }
+
+        // Add blockers
+        if (analysis?.blockers && analysis.blockers.length > 0) {
+          lines.push(`> 🚧 **Blockers**: ${analysis.blockers.join(', ')}`);
+        }
+
+        // Add suggestions
+        if (analysis?.suggestions && analysis.suggestions.length > 0) {
+          lines.push(`> 💡 **Suggestions**: ${analysis.suggestions.join('; ')}`);
+        }
+
+        // Add modified files
+        if (analysis?.filesModified && analysis.filesModified.length > 0) {
+          lines.push(`> 📁 **Files**: ${analysis.filesModified.slice(0, 5).join(', ')}`);
+        }
+
+        // Add concerns
+        if (analysis?.concerns && analysis.concerns.length > 0) {
+          lines.push(`> ⚠️ **Concerns**: ${analysis.concerns.join('; ')}`);
+        }
+
+        return lines.join('\n');
+      });
+      supervisorUpdates = `\n### Supervisor Status Updates:\n${updates.join('\n\n')}`;
+    }
+
+    return `## ${ctx.name} (${ctx.class})
+- **Agent ID**: \`${ctx.id}\`
+- **Status**: ${statusDesc} (${ctx.status})
+- **Idle Time**: ${idleTime}
+- **Last Assigned Task**: ${lastTaskInfo}
 - **Working Directory**: ${cwd}
-- **Context Usage**: ${ctx.contextPercent}% (${ctx.tokensUsed?.toLocaleString() || 0} tokens)
-- **Supervisor Analysis**: ${supervisorSummary}`;
+- **Context Usage**: ${ctx.contextPercent}% (${ctx.tokensUsed?.toLocaleString() || 0} tokens)${fileChangesSection}${conversationSection}${supervisorUpdates}`;
   }));
 
   // Get recent delegation history for this boss
   const delegationHistory = bossService.getDelegationHistory(bossId).slice(0, 5);
   const delegationSummary = delegationHistory.length > 0
-    ? delegationHistory.map(d =>
-        `- "${d.userCommand.slice(0, 50)}${d.userCommand.length > 50 ? '...' : ''}" → ${d.selectedAgentName} (${d.confidence})`
-      ).join('\n')
+    ? delegationHistory.map(d => {
+        const time = formatTimeSince(d.timestamp);
+        return `- [${time} ago] "${truncate(d.userCommand, 60)}" → **${d.selectedAgentName}** (${d.confidence})`;
+      }).join('\n')
     : 'No recent delegations.';
 
-  return `[BOSS AGENT CONTEXT]
+  return `# YOUR TEAM (${contexts.length} agents)
+${subordinateDetails.join('\n\n')}
+
+# RECENT DELEGATION HISTORY
+${delegationSummary}`;
+}
+
+/**
+ * Format time since a timestamp (e.g., "5 minutes", "2 hours")
+ */
+function formatTimeSince(timestamp: number): string {
+  const seconds = Math.floor((Date.now() - timestamp) / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ${minutes % 60}m`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ${hours % 24}h`;
+}
+
+/**
+ * Build minimal system prompt for boss agent.
+ * The detailed instructions are injected in the user message instead.
+ */
+function buildBossInstructions(bossName: string): string {
+  return `You are "${bossName}", a Boss Agent manager. DO NOT USE ANY TOOLS. Respond with plain text only.`;
+}
+
+/**
+ * Build the instructions to inject in user message for boss agents.
+ * These are placed inside the BOSS_CONTEXT delimiters so the frontend can collapse them.
+ */
+function buildBossInstructionsForMessage(bossName: string, hasSubordinates: boolean): string {
+  if (!hasSubordinates) {
+    return `# BOSS INSTRUCTIONS
+
 You are "${bossName}", a Boss Agent in Tide Commander.
 
-## YOUR ROLE
-You are a team coordinator and intelligent task router. Your responsibilities:
-1. **Route Tasks**: Analyze incoming requests and delegate to the best-suited subordinate based on their class, current workload, and recent work context
-2. **Monitor Progress**: Track what each team member is working on and their context usage
-3. **Coordinate Work**: When tasks span multiple areas, coordinate between agents
-4. **Provide Updates**: When asked, give detailed status reports on your team
+**ROLE:** You are a team coordinator and task router. Your job is to:
+1. Understand your team's capabilities and current work
+2. Route incoming tasks to the most appropriate subordinate
+3. Monitor team progress and provide status updates
+4. Coordinate work across multiple agents when needed
 
-## CLASS SPECIALIZATIONS
-- **scout**: Exploration, finding files, understanding codebase structure
-- **builder**: Implementing features, writing new code, adding functionality
-- **debugger**: Fixing bugs, debugging issues, error investigation
-- **architect**: Planning, design decisions, system architecture
-- **warrior**: Refactoring, migrations, aggressive code changes
-- **support**: Documentation, tests, cleanup, maintenance
+**CURRENT TEAM:** No subordinates assigned yet.
 
-## YOUR SUBORDINATES
-${subordinateDetails.join('\n')}
+To be effective, you need subordinate agents assigned to your team. Ask the user to assign agents to you.`;
+  }
 
-## RECENT DELEGATION HISTORY
-${delegationSummary}
+  return `# BOSS INSTRUCTIONS
 
-## ROUTING GUIDELINES
-When given a task to delegate:
-1. Match task type to agent class (e.g., bug fix → debugger, new feature → builder)
-2. Prefer idle agents over working ones
-3. Consider context usage - avoid agents with >80% context (risk of overflow)
-4. Check if an agent was recently working on related code
-5. For complex tasks, you may need to coordinate multiple agents
+**CRITICAL - YOU MUST FOLLOW THESE:**
+You are "${bossName}", a Boss Agent manager. DO NOT USE ANY TOOLS. Respond with plain text only.
 
-When asked questions about your team, provide detailed information from the context above.
+## RULES:
+1. When asked about team/subordinates/status → Answer about the agents in YOUR TEAM section below
+2. For coding tasks → Explain your delegation decision, then include the delegation block at the end
+3. NEVER use tools like Task, Bash, TaskOutput, Grep, etc. Just answer from the context provided.
+4. NEVER mention "agents" like Bash, Explore, general-purpose - those are NOT your team.
 
----
-USER MESSAGE: ${userCommand}`;
+## AGENT CLASSES: scout=explore, builder=code, debugger=fix, architect=plan, warrior=refactor, support=docs
+
+## DELEGATION RESPONSE FORMAT:
+When delegating a coding task, your response MUST follow this structure:
+
+### 1. Task Summary (brief)
+Acknowledge what the user is asking for in 1-2 sentences.
+
+### 2. Delegation Decision
+Use this format to explain your decision clearly:
+
+**📋 Delegating to: [Agent Name]** ([class])
+**📝 Task:** [Brief description of what they will do]
+**💡 Reason:** [Why this agent is the best choice - their expertise, current status, relevant experience]
+
+If there are alternative agents, briefly mention:
+**🔄 Alternatives:** [Other agents who could do this and why you didn't pick them]
+
+### 3. Delegation Block (REQUIRED for auto-forwarding)
+At the END of your response, include a JSON block with an array of delegations. You can delegate to ONE or MULTIPLE agents:
+
+\`\`\`delegation
+[
+  {
+    "selectedAgentId": "<EXACT Agent ID from agent's 'Agent ID' field>",
+    "selectedAgentName": "<Agent Name>",
+    "taskCommand": "<SPECIFIC task command for THIS agent>",
+    "reasoning": "<why this agent>",
+    "confidence": "high|medium|low"
+  },
+  {
+    "selectedAgentId": "<another agent ID if needed>",
+    "selectedAgentName": "<Another Agent Name>",
+    "taskCommand": "<SPECIFIC task command for THIS agent - can be different>",
+    "reasoning": "<why this agent>",
+    "confidence": "high|medium|low"
+  }
+]
+\`\`\`
+
+**CRITICAL:**
+- Use an ARRAY format - even for single delegation, wrap in [ ]
+- "selectedAgentId" MUST be the exact Agent ID string (e.g., \`hj8ojr7i\`). Copy it exactly!
+- "taskCommand" is what gets sent to each agent. Can be different per agent or the same.
+- For multi-agent tasks (like "tell everyone hello"), include ALL agents in the array.
+
+---`;
+}
+
+/**
+ * Build full boss message with instructions and context injected at the beginning.
+ * Both instructions and context are wrapped in delimiters for the frontend to detect and collapse.
+ */
+async function buildBossMessage(bossId: string, command: string): Promise<{ message: string; systemPrompt: string }> {
+  const agent = agentService.getAgent(bossId);
+  const bossName = agent?.name || 'Boss';
+
+  const context = await buildBossContext(bossId);
+  const hasSubordinates = context !== null;
+  const systemPrompt = buildBossInstructions(bossName);
+  const instructions = buildBossInstructionsForMessage(bossName, hasSubordinates);
+
+  if (!context) {
+    // No subordinates - just inject instructions
+    const message = `${BOSS_CONTEXT_START}
+${instructions}
+${BOSS_CONTEXT_END}
+
+${command}`;
+    return { message, systemPrompt };
+  }
+
+  // Inject instructions + context at the beginning of the user message with delimiters
+  const message = `${BOSS_CONTEXT_START}
+${instructions}
+
+${context}
+${BOSS_CONTEXT_END}
+
+${command}`;
+
+  return { message, systemPrompt };
 }
 
 // ============================================================================
@@ -862,12 +1083,73 @@ function setupServiceListeners(): void {
       sendActivity(agentId, `Error: ${event.errorMessage}`);
     }
 
+    // For boss agents, parse delegation from step_complete result text
+    if (event.type === 'step_complete' && event.resultText) {
+      const agent = agentService.getAgent(agentId);
+      if (agent?.class === 'boss') {
+        log.log(` Boss ${agent.name} step_complete with resultText (length: ${event.resultText.length})`);
+        parseBossDelegation(agentId, agent.name, event.resultText);
+      }
+    }
+
     // Broadcast raw event
     broadcast({
       type: 'event',
       payload: { ...event, agentId } as any,
     });
   });
+
+  // Helper to parse delegation from boss response (supports single object or array of delegations)
+  function parseBossDelegation(agentId: string, bossName: string, resultText: string): void {
+    log.log(` Boss ${bossName} checking for delegation block: ${resultText.includes('```delegation')}`);
+
+    // Parse delegation block: ```delegation\n[...]\n``` or ```delegation\n{...}\n```
+    const delegationMatch = resultText.match(/```delegation\s*\n([\s\S]*?)\n```/);
+    if (delegationMatch) {
+      log.log(` Boss ${bossName} delegation match found!`);
+      try {
+        const parsed = JSON.parse(delegationMatch[1].trim());
+
+        // Support both array and single object format
+        const delegations = Array.isArray(parsed) ? parsed : [parsed];
+
+        log.log(` Parsed ${delegations.length} delegation(s) from boss ${bossName}`);
+
+        const originalCommand = lastBossCommands.get(agentId) || '';
+
+        // Process each delegation
+        for (const delegationJson of delegations) {
+          const taskCommand = delegationJson.taskCommand || originalCommand;
+
+          log.log(` Delegation to ${delegationJson.selectedAgentName}: "${taskCommand.slice(0, 80)}..."`);
+
+          const decision: DelegationDecision = {
+            id: `del-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            timestamp: Date.now(),
+            bossId: agentId,
+            userCommand: taskCommand,  // Use the task command for forwarding
+            selectedAgentId: delegationJson.selectedAgentId,
+            selectedAgentName: delegationJson.selectedAgentName,
+            reasoning: delegationJson.reasoning || '',
+            alternativeAgents: delegationJson.alternativeAgents || [],
+            confidence: delegationJson.confidence || 'medium',
+            status: 'sent',
+          };
+
+          // Store in boss history
+          bossService.addDelegationToHistory(agentId, decision);
+
+          // Emit the delegation decision (will trigger auto-forward on frontend)
+          broadcast({
+            type: 'delegation_decision',
+            payload: decision,
+          });
+        }
+      } catch (err) {
+        log.error(` Failed to parse delegation JSON from boss ${bossName}:`, err);
+      }
+    }
+  }
 
   claudeService.on('output', (agentId, text, isStreaming) => {
     broadcast({

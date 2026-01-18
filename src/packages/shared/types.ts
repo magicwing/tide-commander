@@ -101,6 +101,11 @@ export interface SubordinateContext {
   tokensUsed: number;
 }
 
+// Boss context delimiters - used to inject subordinate context at the beginning of user messages
+// The frontend detects these to collapse/hide the context section in the UI
+export const BOSS_CONTEXT_START = '<<<BOSS_CONTEXT_START>>>';
+export const BOSS_CONTEXT_END = '<<<BOSS_CONTEXT_END>>>';
+
 // ============================================================================
 // Building Types
 // ============================================================================
@@ -120,13 +125,18 @@ export const BUILDING_TYPES: Record<BuildingType, { icon: string; color: string;
 export type BuildingStatus = 'running' | 'stopped' | 'error' | 'unknown' | 'starting' | 'stopping';
 
 // Building visual styles
-export type BuildingStyle = 'server-rack' | 'tower' | 'dome' | 'pyramid';
+export type BuildingStyle = 'server-rack' | 'tower' | 'dome' | 'pyramid' | 'desktop' | 'filing-cabinet' | 'satellite' | 'crystal' | 'factory';
 
 export const BUILDING_STYLES: Record<BuildingStyle, { label: string; description: string }> = {
   'server-rack': { label: 'Server Rack', description: 'Classic server rack with blinking LEDs' },
   'tower': { label: 'Control Tower', description: 'Tall tower with rotating antenna' },
   'dome': { label: 'Data Dome', description: 'Futuristic dome with energy ring' },
   'pyramid': { label: 'Power Pyramid', description: 'Egyptian-style pyramid with glowing core' },
+  'desktop': { label: 'Desktop PC', description: 'Retro computer with monitor and keyboard' },
+  'filing-cabinet': { label: 'Filing Cabinet', description: 'Office cabinet with sliding drawers' },
+  'satellite': { label: 'Satellite Dish', description: 'Communication dish with rotating receiver' },
+  'crystal': { label: 'Data Crystal', description: 'Floating crystal with energy particles' },
+  'factory': { label: 'Mini Factory', description: 'Industrial building with smoking chimney' },
 };
 
 // Building configuration
@@ -326,6 +336,22 @@ export interface StopAgentMessage extends WSMessage {
   };
 }
 
+// Clear agent's context/session (force new session on next command)
+export interface ClearContextMessage extends WSMessage {
+  type: 'clear_context';
+  payload: {
+    agentId: string;
+  };
+}
+
+// Collapse context (compact the session to save tokens)
+export interface CollapseContextMessage extends WSMessage {
+  type: 'collapse_context';
+  payload: {
+    agentId: string;
+  };
+}
+
 export interface CreateDirectoryMessage extends WSMessage {
   type: 'create_directory';
   payload: {
@@ -437,6 +463,10 @@ export interface AgentAnalysis {
   statusDescription: string;
   progress: 'on_track' | 'stalled' | 'blocked' | 'completed' | 'idle';
   recentWorkSummary: string;
+  currentFocus?: string;
+  blockers?: string[];
+  suggestions?: string[];
+  filesModified?: string[];
   concerns?: string[];
 }
 
@@ -755,6 +785,8 @@ export type ClientMessage =
   | MoveAgentMessage
   | KillAgentMessage
   | StopAgentMessage
+  | ClearContextMessage
+  | CollapseContextMessage
   | CreateDirectoryMessage
   | RemoveAgentMessage
   | RenameAgentMessage

@@ -178,6 +178,7 @@ export const logger = {
   agent: createLogger('Agent'),
   files: createLogger('Files'),
   supervisor: createLogger('Supervisor'),
+  boss: createLogger('Boss'),
 };
 
 export { Logger };

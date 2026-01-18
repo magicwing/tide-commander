@@ -637,18 +637,32 @@ export class CharacterFactory {
 
   /**
    * Update visual state of an agent mesh.
+   * @param isSubordinateOfSelectedBoss - true if this agent is a subordinate of the currently selected boss
    */
-  updateVisuals(group: THREE.Group, agent: Agent, isSelected: boolean): void {
+  updateVisuals(group: THREE.Group, agent: Agent, isSelected: boolean, isSubordinateOfSelectedBoss: boolean = false): void {
     // Update name label if name changed
     if (group.userData.agentName !== agent.name) {
       this.updateNameLabel(group, agent.name, agent.class);
       group.userData.agentName = agent.name;
     }
 
-    // Update selection ring visibility
+    // Update selection ring visibility and color
     const selectionRing = group.getObjectByName('selectionRing') as THREE.Mesh;
     if (selectionRing) {
-      (selectionRing.material as THREE.MeshBasicMaterial).opacity = isSelected ? 0.8 : 0;
+      const material = selectionRing.material as THREE.MeshBasicMaterial;
+      if (isSelected) {
+        // Normal selection - use agent's class color
+        const classConfig = AGENT_CLASS_CONFIG[agent.class];
+        material.color.setHex(classConfig?.color ?? 0xffffff);
+        material.opacity = 0.8;
+      } else if (isSubordinateOfSelectedBoss) {
+        // Subordinate of selected boss - gold ring to match boss
+        material.color.setHex(0xffd700);
+        material.opacity = 0.5;
+      } else {
+        // Not selected
+        material.opacity = 0;
+      }
     }
 
     // Update mana bar (includes status dot)

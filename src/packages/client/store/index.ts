@@ -104,7 +104,7 @@ export interface StoreState {
   selectedAreaId: string | null;
   // Buildings
   buildings: Map<string, Building>;
-  selectedBuildingId: string | null;
+  selectedBuildingIds: Set<string>;
   buildingLogs: Map<string, string[]>; // Building ID -> logs
   // Claude outputs per agent
   agentOutputs: Map<string, ClaudeOutput[]>;
@@ -130,6 +130,8 @@ export interface StoreState {
   delegationHistories: Map<string, DelegationDecision[]>;
   // Pending delegation (when boss is deciding)
   pendingDelegation: { bossId: string; command: string } | null;
+  // Track last delegation received per subordinate agent (agentId -> delegation info)
+  lastDelegationReceived: Map<string, { bossName: string; taskCommand: string; timestamp: number }>;
 }
 
 // Store actions
@@ -150,7 +152,7 @@ class Store {
     selectedAreaId: null,
     // Buildings
     buildings: new Map(),
-    selectedBuildingId: null,
+    selectedBuildingIds: new Set(),
     buildingLogs: new Map(),
     // Claude outputs
     agentOutputs: new Map(),
@@ -210,6 +212,7 @@ class Store {
     // Boss delegation
     delegationHistories: new Map(),
     pendingDelegation: null,
+    lastDelegationReceived: new Map(),
   };
 
   private listeners = new Set<Listener>();
@@ -727,6 +730,24 @@ class Store {
     });
   }
 
+  // Clear agent context (force new session on next command)
+  clearContext(agentId: string): void {
+    this.sendMessage?.({
+      type: 'clear_context',
+      payload: { agentId },
+    });
+    // Also clear local outputs
+    this.clearOutputs(agentId);
+  }
+
+  // Collapse context (compact the session to save tokens)
+  collapseContext(agentId: string): void {
+    this.sendMessage?.({
+      type: 'collapse_context',
+      payload: { agentId },
+    });
+  }
+
   // Remove agent from UI and persistence (keeps Claude session running)
   removeAgentFromServer(agentId: string): void {
     this.sendMessage?.({
@@ -934,9 +955,51 @@ class Store {
 
   // ===== Buildings =====
 
-  // Select building
+  // Select building (single selection, clears previous)
   selectBuilding(buildingId: string | null): void {
-    this.state.selectedBuildingId = buildingId;
+    this.state.selectedBuildingIds.clear();
+    if (buildingId) {
+      this.state.selectedBuildingIds.add(buildingId);
+    }
+    this.notify();
+  }
+
+  // Select multiple buildings (for drag selection)
+  selectMultipleBuildings(buildingIds: string[]): void {
+    this.state.selectedBuildingIds.clear();
+    for (const id of buildingIds) {
+      this.state.selectedBuildingIds.add(id);
+    }
+    this.notify();
+  }
+
+  // Toggle building selection (with shift key)
+  toggleBuildingSelection(buildingId: string): void {
+    if (this.state.selectedBuildingIds.has(buildingId)) {
+      this.state.selectedBuildingIds.delete(buildingId);
+    } else {
+      this.state.selectedBuildingIds.add(buildingId);
+    }
+    this.notify();
+  }
+
+  // Check if building is selected
+  isBuildingSelected(buildingId: string): boolean {
+    return this.state.selectedBuildingIds.has(buildingId);
+  }
+
+  // Get all selected building IDs
+  getSelectedBuildingIds(): string[] {
+    return Array.from(this.state.selectedBuildingIds);
+  }
+
+  // Delete selected buildings
+  deleteSelectedBuildings(): void {
+    for (const buildingId of this.state.selectedBuildingIds) {
+      this.state.buildings.delete(buildingId);
+    }
+    this.state.selectedBuildingIds.clear();
+    this.syncBuildingsToServer();
     this.notify();
   }
 
@@ -966,9 +1029,7 @@ class Store {
     const newBuildings = new Map(this.state.buildings);
     newBuildings.delete(buildingId);
     this.state.buildings = newBuildings;
-    if (this.state.selectedBuildingId === buildingId) {
-      this.state.selectedBuildingId = null;
-    }
+    this.state.selectedBuildingIds.delete(buildingId);
     this.syncBuildingsToServer();
     this.notify();
   }
@@ -1068,9 +1129,7 @@ class Store {
     const newBuildings = new Map(this.state.buildings);
     newBuildings.delete(buildingId);
     this.state.buildings = newBuildings;
-    if (this.state.selectedBuildingId === buildingId) {
-      this.state.selectedBuildingId = null;
-    }
+    this.state.selectedBuildingIds.delete(buildingId);
     this.notify();
   }
 
@@ -1272,6 +1331,18 @@ class Store {
     newHistories.set(decision.bossId, bossHistory);
     this.state.delegationHistories = newHistories;
 
+    // Track that the subordinate received a delegated task
+    if (decision.status === 'sent' && decision.selectedAgentId) {
+      const boss = this.state.agents.get(decision.bossId);
+      const newReceived = new Map(this.state.lastDelegationReceived);
+      newReceived.set(decision.selectedAgentId, {
+        bossName: boss?.name || 'Boss',
+        taskCommand: decision.userCommand,
+        timestamp: Date.now(),
+      });
+      this.state.lastDelegationReceived = newReceived;
+    }
+
     // Clear pending if this is the result
     if (
       this.state.pendingDelegation?.bossId === decision.bossId &&
@@ -1298,6 +1369,25 @@ class Store {
    */
   getDelegationHistory(bossId: string): DelegationDecision[] {
     return this.state.delegationHistories.get(bossId) || [];
+  }
+
+  /**
+   * Get last delegation received by an agent (if any)
+   */
+  getLastDelegationReceived(agentId: string): { bossName: string; taskCommand: string; timestamp: number } | null {
+    return this.state.lastDelegationReceived.get(agentId) || null;
+  }
+
+  /**
+   * Clear last delegation for an agent (call when agent completes the task)
+   */
+  clearLastDelegationReceived(agentId: string): void {
+    if (this.state.lastDelegationReceived.has(agentId)) {
+      const newReceived = new Map(this.state.lastDelegationReceived);
+      newReceived.delete(agentId);
+      this.state.lastDelegationReceived = newReceived;
+      this.notify();
+    }
   }
 
   /**
