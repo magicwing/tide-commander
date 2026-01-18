@@ -1,0 +1,395 @@
+/**
+ * Performance Profiling Utilities
+ *
+ * Tools for measuring and monitoring performance in development.
+ *
+ * Usage:
+ *   import { perf, FPSMeter } from './utils/profiling';
+ *
+ *   // Timing operations
+ *   perf.start('myOperation');
+ *   // ... do work ...
+ *   perf.end('myOperation');
+ *
+ *   // Get metrics
+ *   console.log(perf.getMetrics());
+ */
+
+// Only enable profiling in development
+const isDev = import.meta.env.DEV;
+
+// Store for timing data
+interface TimingEntry {
+  count: number;
+  totalMs: number;
+  minMs: number;
+  maxMs: number;
+  lastMs: number;
+  samples: number[]; // Last N samples for calculating percentiles
+}
+
+const MAX_SAMPLES = 100;
+const timings = new Map<string, TimingEntry>();
+const activeTimers = new Map<string, number>();
+
+/**
+ * Performance measurement utilities.
+ */
+export const perf = {
+  /**
+   * Start timing an operation.
+   */
+  start(label: string): void {
+    if (!isDev) return;
+    activeTimers.set(label, performance.now());
+  },
+
+  /**
+   * End timing an operation and record the result.
+   */
+  end(label: string): number | undefined {
+    if (!isDev) return;
+
+    const startTime = activeTimers.get(label);
+    if (startTime === undefined) {
+      console.warn(`[Perf] No active timer for: ${label}`);
+      return;
+    }
+
+    const elapsed = performance.now() - startTime;
+    activeTimers.delete(label);
+
+    // Update or create entry
+    let entry = timings.get(label);
+    if (!entry) {
+      entry = {
+        count: 0,
+        totalMs: 0,
+        minMs: Infinity,
+        maxMs: -Infinity,
+        lastMs: 0,
+        samples: [],
+      };
+      timings.set(label, entry);
+    }
+
+    entry.count++;
+    entry.totalMs += elapsed;
+    entry.minMs = Math.min(entry.minMs, elapsed);
+    entry.maxMs = Math.max(entry.maxMs, elapsed);
+    entry.lastMs = elapsed;
+    entry.samples.push(elapsed);
+
+    // Keep only last N samples
+    if (entry.samples.length > MAX_SAMPLES) {
+      entry.samples.shift();
+    }
+
+    // Log slow operations (>16ms = frame budget)
+    if (elapsed > 16) {
+      console.warn(`[Perf] Slow operation: ${label} took ${elapsed.toFixed(2)}ms`);
+    }
+
+    return elapsed;
+  },
+
+  /**
+   * Measure an async operation.
+   */
+  async measure<T>(label: string, fn: () => Promise<T>): Promise<T> {
+    this.start(label);
+    try {
+      return await fn();
+    } finally {
+      this.end(label);
+    }
+  },
+
+  /**
+   * Measure a sync operation.
+   */
+  measureSync<T>(label: string, fn: () => T): T {
+    this.start(label);
+    try {
+      return fn();
+    } finally {
+      this.end(label);
+    }
+  },
+
+  /**
+   * Get metrics for a specific label or all labels.
+   */
+  getMetrics(label?: string): Record<string, {
+    count: number;
+    avgMs: number;
+    minMs: number;
+    maxMs: number;
+    lastMs: number;
+    p50Ms: number;
+    p95Ms: number;
+    p99Ms: number;
+  }> {
+    const result: Record<string, any> = {};
+
+    const entries: Array<[string, TimingEntry]> = label
+      ? (timings.has(label) ? [[label, timings.get(label)!]] : [])
+      : Array.from(timings.entries());
+
+    for (const [key, entry] of entries) {
+      const sorted = [...entry.samples].sort((a, b) => a - b);
+      const p50Idx = Math.floor(sorted.length * 0.5);
+      const p95Idx = Math.floor(sorted.length * 0.95);
+      const p99Idx = Math.floor(sorted.length * 0.99);
+
+      result[key] = {
+        count: entry.count,
+        avgMs: entry.totalMs / entry.count,
+        minMs: entry.minMs,
+        maxMs: entry.maxMs,
+        lastMs: entry.lastMs,
+        p50Ms: sorted[p50Idx] || 0,
+        p95Ms: sorted[p95Idx] || 0,
+        p99Ms: sorted[p99Idx] || 0,
+      };
+    }
+
+    return result;
+  },
+
+  /**
+   * Clear all timing data.
+   */
+  clear(): void {
+    timings.clear();
+    activeTimers.clear();
+  },
+
+  /**
+   * Print a formatted report to console.
+   */
+  report(): void {
+    if (!isDev) return;
+
+    const metrics = this.getMetrics();
+    const entries = Object.entries(metrics).sort((a, b) => b[1].avgMs - a[1].avgMs);
+
+    console.group('%c[Performance Report]', 'color: #4a9eff; font-weight: bold');
+    console.table(entries.map(([label, m]) => ({
+      Operation: label,
+      Count: m.count,
+      'Avg (ms)': m.avgMs.toFixed(2),
+      'Min (ms)': m.minMs.toFixed(2),
+      'Max (ms)': m.maxMs.toFixed(2),
+      'P50 (ms)': m.p50Ms.toFixed(2),
+      'P95 (ms)': m.p95Ms.toFixed(2),
+    })));
+    console.groupEnd();
+  },
+};
+
+/**
+ * FPS tracking for canvas rendering.
+ */
+class FPSTracker {
+  private frames: number[] = [];
+  private lastFrameTime = 0;
+  private frameCount = 0;
+  private fps = 0;
+  private minFps = Infinity;
+  private maxFps = 0;
+  private fpsHistory: number[] = [];
+  private readonly maxHistorySize = 60; // 1 minute at 1 sample/sec
+
+  /**
+   * Call this at the start of each frame.
+   */
+  tick(): void {
+    const now = performance.now();
+
+    if (this.lastFrameTime > 0) {
+      const delta = now - this.lastFrameTime;
+      this.frames.push(delta);
+
+      // Keep last 60 frames for rolling average
+      if (this.frames.length > 60) {
+        this.frames.shift();
+      }
+    }
+
+    this.lastFrameTime = now;
+    this.frameCount++;
+  }
+
+  /**
+   * Call this once per second to update FPS.
+   */
+  update(): void {
+    if (this.frames.length === 0) return;
+
+    const avgFrameTime = this.frames.reduce((a, b) => a + b, 0) / this.frames.length;
+    this.fps = 1000 / avgFrameTime;
+
+    this.minFps = Math.min(this.minFps, this.fps);
+    this.maxFps = Math.max(this.maxFps, this.fps);
+
+    this.fpsHistory.push(this.fps);
+    if (this.fpsHistory.length > this.maxHistorySize) {
+      this.fpsHistory.shift();
+    }
+  }
+
+  /**
+   * Get current FPS.
+   */
+  getFPS(): number {
+    return Math.round(this.fps);
+  }
+
+  /**
+   * Get FPS statistics.
+   */
+  getStats(): { current: number; min: number; max: number; avg: number } {
+    const avg = this.fpsHistory.length > 0
+      ? this.fpsHistory.reduce((a, b) => a + b, 0) / this.fpsHistory.length
+      : this.fps;
+
+    return {
+      current: Math.round(this.fps),
+      min: Math.round(this.minFps === Infinity ? 0 : this.minFps),
+      max: Math.round(this.maxFps),
+      avg: Math.round(avg),
+    };
+  }
+
+  /**
+   * Reset statistics.
+   */
+  reset(): void {
+    this.frames = [];
+    this.lastFrameTime = 0;
+    this.frameCount = 0;
+    this.fps = 0;
+    this.minFps = Infinity;
+    this.maxFps = 0;
+    this.fpsHistory = [];
+  }
+}
+
+// Singleton FPS tracker
+export const fpsTracker = new FPSTracker();
+
+/**
+ * Memory usage tracking (if available).
+ */
+export const memory = {
+  /**
+   * Get current memory usage in MB.
+   */
+  getUsage(): { usedMB: number; totalMB: number; limitMB: number } | null {
+    // @ts-ignore - performance.memory is Chrome-specific
+    const mem = performance.memory;
+    if (!mem) return null;
+
+    return {
+      usedMB: Math.round(mem.usedJSHeapSize / 1024 / 1024),
+      totalMB: Math.round(mem.totalJSHeapSize / 1024 / 1024),
+      limitMB: Math.round(mem.jsHeapSizeLimit / 1024 / 1024),
+    };
+  },
+
+  /**
+   * Log memory usage.
+   */
+  log(): void {
+    const usage = this.getUsage();
+    if (usage) {
+      console.log(`[Memory] Used: ${usage.usedMB}MB / ${usage.totalMB}MB (limit: ${usage.limitMB}MB)`);
+    }
+  },
+};
+
+/**
+ * React Profiler callback for measuring render times.
+ * Use with <React.Profiler id="ComponentName" onRender={profileRender}>
+ */
+export function profileRender(
+  id: string,
+  phase: 'mount' | 'update' | 'nested-update',
+  actualDuration: number,
+  baseDuration: number,
+  startTime: number,
+  commitTime: number
+): void {
+  if (!isDev) return;
+
+  const label = `React:${id}:${phase}`;
+
+  // Record in our timing system
+  let entry = timings.get(label);
+  if (!entry) {
+    entry = {
+      count: 0,
+      totalMs: 0,
+      minMs: Infinity,
+      maxMs: -Infinity,
+      lastMs: 0,
+      samples: [],
+    };
+    timings.set(label, entry);
+  }
+
+  entry.count++;
+  entry.totalMs += actualDuration;
+  entry.minMs = Math.min(entry.minMs, actualDuration);
+  entry.maxMs = Math.max(entry.maxMs, actualDuration);
+  entry.lastMs = actualDuration;
+  entry.samples.push(actualDuration);
+
+  if (entry.samples.length > MAX_SAMPLES) {
+    entry.samples.shift();
+  }
+
+  // Warn about slow renders (>16ms)
+  if (actualDuration > 16) {
+    console.warn(
+      `[Profiler] Slow ${phase} of ${id}: ${actualDuration.toFixed(2)}ms (base: ${baseDuration.toFixed(2)}ms)`
+    );
+  }
+}
+
+/**
+ * Create a performance mark (visible in DevTools Performance tab).
+ */
+export function mark(name: string): void {
+  if (!isDev) return;
+  performance.mark(`tide:${name}`);
+}
+
+/**
+ * Create a performance measure between two marks.
+ */
+export function measure(name: string, startMark: string, endMark?: string): void {
+  if (!isDev) return;
+  try {
+    performance.measure(
+      `tide:${name}`,
+      `tide:${startMark}`,
+      endMark ? `tide:${endMark}` : undefined
+    );
+  } catch (e) {
+    // Marks may not exist
+  }
+}
+
+// Expose to window for debugging
+if (isDev && typeof window !== 'undefined') {
+  (window as any).__tidePerf = {
+    perf,
+    fpsTracker,
+    memory,
+    report: () => perf.report(),
+    clear: () => perf.clear(),
+  };
+  console.log('[Profiling] Performance tools available at window.__tidePerf');
+}

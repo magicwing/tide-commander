@@ -4,6 +4,7 @@ import type { Agent, DrawingArea } from '../../shared/types';
 import { store } from '../store';
 import { saveCameraState, loadCameraState } from '../utils/camera';
 import { CAMERA_SAVE_INTERVAL } from './config';
+import { perf, fpsTracker } from '../utils/profiling';
 
 // Import modules
 import { CharacterLoader, CharacterFactory, type AgentMeshData } from './characters';
@@ -893,6 +894,10 @@ export class SceneManager {
   private animate = (): void => {
     requestAnimationFrame(this.animate);
 
+    // Track FPS
+    fpsTracker.tick();
+    perf.start('scene:frame');
+
     this.controls.update();
 
     // Calculate delta time
@@ -947,7 +952,11 @@ export class SceneManager {
     // Update boss-subordinate connection lines to follow moving agents
     this.updateBossSubordinateLines();
 
+    perf.start('scene:render');
     this.renderer.render(this.scene, this.camera);
+    perf.end('scene:render');
+
+    perf.end('scene:frame');
   };
 
   private updateBossSubordinateLines(): void {

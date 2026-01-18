@@ -1,0 +1,225 @@
+/**
+ * FPSMeter Component
+ *
+ * A floating overlay that shows real-time FPS and performance metrics.
+ * Only visible in development mode.
+ *
+ * Usage:
+ *   <FPSMeter visible={showFPS} />
+ */
+
+import React, { useEffect, useState, useRef } from 'react';
+import { fpsTracker, memory, perf } from '../utils/profiling';
+
+interface FPSMeterProps {
+  visible?: boolean;
+  position?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+}
+
+// Only show in development
+const isDev = import.meta.env.DEV;
+
+export function FPSMeter({ visible = true, position = 'top-right' }: FPSMeterProps) {
+  const [fps, setFps] = useState(0);
+  const [fpsHistory, setFpsHistory] = useState<number[]>([]);
+  const [memoryUsage, setMemoryUsage] = useState<{ usedMB: number; totalMB: number } | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const rafRef = useRef<number>(0);
+  const lastUpdateRef = useRef(0);
+
+  useEffect(() => {
+    if (!isDev || !visible) return;
+
+    let frameCount = 0;
+
+    const tick = (time: number) => {
+      fpsTracker.tick();
+      frameCount++;
+
+      // Update display every second
+      if (time - lastUpdateRef.current >= 1000) {
+        fpsTracker.update();
+        const stats = fpsTracker.getStats();
+        setFps(stats.current);
+        setFpsHistory(prev => {
+          const next = [...prev, stats.current];
+          return next.slice(-60); // Keep last 60 seconds
+        });
+
+        // Update memory if available
+        const mem = memory.getUsage();
+        if (mem) {
+          setMemoryUsage({ usedMB: mem.usedMB, totalMB: mem.totalMB });
+        }
+
+        lastUpdateRef.current = time;
+      }
+
+      rafRef.current = requestAnimationFrame(tick);
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      cancelAnimationFrame(rafRef.current);
+    };
+  }, [visible]);
+
+  if (!isDev || !visible) return null;
+
+  const getFpsColor = (fps: number) => {
+    if (fps >= 55) return '#4aff9e'; // Green - good
+    if (fps >= 30) return '#ffcc00'; // Yellow - acceptable
+    return '#ff4a4a'; // Red - bad
+  };
+
+  const stats = fpsTracker.getStats();
+
+  const positionStyles: Record<string, React.CSSProperties> = {
+    'top-left': { top: 10, left: 10 },
+    'top-right': { top: 10, right: 10 },
+    'bottom-left': { bottom: 10, left: 10 },
+    'bottom-right': { bottom: 10, right: 10 },
+  };
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        ...positionStyles[position],
+        zIndex: 99999,
+        fontFamily: 'monospace',
+        fontSize: '11px',
+        background: 'rgba(0, 0, 0, 0.85)',
+        border: '1px solid rgba(255, 255, 255, 0.2)',
+        borderRadius: '4px',
+        padding: '6px 10px',
+        color: '#fff',
+        cursor: 'pointer',
+        userSelect: 'none',
+        minWidth: expanded ? '180px' : '70px',
+        transition: 'all 0.2s ease',
+      }}
+      onClick={() => setExpanded(!expanded)}
+      title="Click to expand/collapse"
+    >
+      {/* Main FPS display */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <span style={{ color: getFpsColor(fps), fontWeight: 'bold', fontSize: '14px' }}>
+          {fps}
+        </span>
+        <span style={{ color: '#888' }}>FPS</span>
+        {memoryUsage && (
+          <span style={{ color: '#888', marginLeft: '6px' }}>
+            {memoryUsage.usedMB}MB
+          </span>
+        )}
+      </div>
+
+      {/* Expanded view */}
+      {expanded && (
+        <div style={{ marginTop: '8px', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '8px' }}>
+          {/* FPS Stats */}
+          <div style={{ marginBottom: '6px' }}>
+            <div style={{ color: '#888', marginBottom: '2px' }}>FPS Stats:</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 10px', fontSize: '10px' }}>
+              <span>Min:</span>
+              <span style={{ color: getFpsColor(stats.min) }}>{stats.min}</span>
+              <span>Max:</span>
+              <span style={{ color: getFpsColor(stats.max) }}>{stats.max}</span>
+              <span>Avg:</span>
+              <span style={{ color: getFpsColor(stats.avg) }}>{stats.avg}</span>
+            </div>
+          </div>
+
+          {/* FPS Graph (simple ASCII-style) */}
+          <div style={{ marginBottom: '6px' }}>
+            <div style={{ color: '#888', marginBottom: '2px' }}>History:</div>
+            <div style={{ display: 'flex', alignItems: 'flex-end', height: '20px', gap: '1px' }}>
+              {fpsHistory.slice(-30).map((f, i) => (
+                <div
+                  key={i}
+                  style={{
+                    width: '3px',
+                    height: `${Math.min(100, (f / 60) * 100)}%`,
+                    background: getFpsColor(f),
+                    opacity: 0.7,
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Memory */}
+          {memoryUsage && (
+            <div style={{ marginBottom: '6px' }}>
+              <div style={{ color: '#888', marginBottom: '2px' }}>Memory:</div>
+              <div style={{ fontSize: '10px' }}>
+                {memoryUsage.usedMB}MB / {memoryUsage.totalMB}MB
+                <div
+                  style={{
+                    height: '4px',
+                    background: 'rgba(255,255,255,0.1)',
+                    borderRadius: '2px',
+                    marginTop: '2px',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      height: '100%',
+                      width: `${(memoryUsage.usedMB / memoryUsage.totalMB) * 100}%`,
+                      background: memoryUsage.usedMB / memoryUsage.totalMB > 0.8 ? '#ff4a4a' : '#4a9eff',
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Actions */}
+          <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                perf.report();
+              }}
+              style={{
+                background: 'rgba(74, 158, 255, 0.3)',
+                border: '1px solid rgba(74, 158, 255, 0.5)',
+                color: '#4a9eff',
+                padding: '2px 6px',
+                borderRadius: '3px',
+                fontSize: '10px',
+                cursor: 'pointer',
+              }}
+            >
+              Report
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                perf.clear();
+                fpsTracker.reset();
+                setFpsHistory([]);
+              }}
+              style={{
+                background: 'rgba(255, 74, 74, 0.3)',
+                border: '1px solid rgba(255, 74, 74, 0.5)',
+                color: '#ff4a4a',
+                padding: '2px 6px',
+                borderRadius: '3px',
+                fontSize: '10px',
+                cursor: 'pointer',
+              }}
+            >
+              Reset
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default FPSMeter;

@@ -1207,9 +1207,6 @@ export function ClaudeOutputPanel() {
                     }}
                   />
                 ))}
-              {history.length > 0 && outputs.length > 0 && (
-                <div className="output-separator">--- Live Output ---</div>
-              )}
               {outputs
                 .filter(output => {
                   if (viewMode === 'advanced') return true;

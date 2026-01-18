@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, Profiler } from 'react';
 import { store, useStore } from './store';
 import { connect, setCallbacks, getSocket } from './websocket';
 import { SceneManager } from './scene/SceneManager';
@@ -18,6 +18,8 @@ import { Spotlight } from './components/Spotlight';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { BuildingConfigModal } from './components/BuildingConfigModal';
 import { matchesShortcut } from './store/shortcuts';
+import { FPSMeter } from './components/FPSMeter';
+import { profileRender } from './utils/profiling';
 
 // Persist scene manager across HMR
 let persistedScene: SceneManager | null = null;
@@ -91,6 +93,10 @@ function AppContent() {
   const [editingBuildingId, setEditingBuildingId] = useState<string | null>(null);
   const [sceneConfig, setSceneConfig] = useState(loadConfig);
   const [explorerAreaId, setExplorerAreaId] = useState<string | null>(null);
+  const [showFPS, setShowFPS] = useState(() => {
+    // Only show FPS meter in development by default, can be toggled
+    return import.meta.env.DEV && localStorage.getItem('tide-show-fps') !== 'false';
+  });
   const { showToast } = useToast();
   const state = useStore();
 
@@ -419,6 +425,9 @@ function AppContent() {
 
   return (
     <div className="app">
+      {/* FPS Meter - development only */}
+      <FPSMeter visible={showFPS} position="top-right" />
+
       <main className="main-content">
         <div className="battlefield-container">
           <canvas ref={canvasRef} id="battlefield"></canvas>
@@ -429,31 +438,39 @@ function AppContent() {
           {state.selectedAgentIds.size > 0 ? (
             <>
               <div className="sidebar-section unit-section">
+                <Profiler id="UnitPanel" onRender={profileRender}>
+                  <UnitPanel
+                    onFocusAgent={handleFocusAgent}
+                    onKillAgent={handleKillAgent}
+                    onCallSubordinates={handleCallSubordinates}
+                    onOpenAreaExplorer={handleOpenAreaExplorer}
+                  />
+                </Profiler>
+              </div>
+              <div className="sidebar-section tool-history-section">
+                <Profiler id="ToolHistory" onRender={profileRender}>
+                  <ToolHistory agentIds={Array.from(state.selectedAgentIds)} />
+                </Profiler>
+              </div>
+            </>
+          ) : (
+            <div className="sidebar-section unit-section">
+              <Profiler id="UnitPanel" onRender={profileRender}>
                 <UnitPanel
                   onFocusAgent={handleFocusAgent}
                   onKillAgent={handleKillAgent}
                   onCallSubordinates={handleCallSubordinates}
                   onOpenAreaExplorer={handleOpenAreaExplorer}
                 />
-              </div>
-              <div className="sidebar-section tool-history-section">
-                <ToolHistory agentIds={Array.from(state.selectedAgentIds)} />
-              </div>
-            </>
-          ) : (
-            <div className="sidebar-section unit-section">
-              <UnitPanel
-                onFocusAgent={handleFocusAgent}
-                onKillAgent={handleKillAgent}
-                onCallSubordinates={handleCallSubordinates}
-                onOpenAreaExplorer={handleOpenAreaExplorer}
-              />
+              </Profiler>
             </div>
           )}
         </aside>
 
         {/* Guake-style dropdown terminal */}
-        <ClaudeOutputPanel />
+        <Profiler id="ClaudeOutputPanel" onRender={profileRender}>
+          <ClaudeOutputPanel />
+        </Profiler>
       </main>
 
       {/* Floating settings button */}
@@ -577,10 +594,12 @@ function AppContent() {
         </svg>
       </button>
 
-      <CommanderView
-        isOpen={isCommanderViewOpen}
-        onClose={() => setIsCommanderViewOpen(false)}
-      />
+      <Profiler id="CommanderView" onRender={profileRender}>
+        <CommanderView
+          isOpen={isCommanderViewOpen}
+          onClose={() => setIsCommanderViewOpen(false)}
+        />
+      </Profiler>
 
       {/* Supervisor Panel */}
       <SupervisorPanel

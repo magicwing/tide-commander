@@ -77,8 +77,72 @@ export class EffectsManager {
   private delegationEffects: DelegationEffect[] = [];
   private agentMeshes: Map<string, THREE.Group> = new Map();
 
+  // Cached texture for delegation paper effect (created once, reused)
+  private delegationPaperTexture: THREE.CanvasTexture | null = null;
+
   constructor(scene: THREE.Scene) {
     this.scene = scene;
+    this.createDelegationPaperTexture();
+  }
+
+  /**
+   * Create and cache the delegation paper texture (called once).
+   */
+  private createDelegationPaperTexture(): void {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d')!;
+    canvas.width = 64;
+    canvas.height = 64;
+
+    // Draw paper document icon
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = '#ffd700'; // Gold border
+    ctx.lineWidth = 2;
+
+    // Paper shape
+    ctx.save();
+    ctx.translate(32, 32);
+    ctx.rotate(-0.2);
+
+    // Paper body
+    ctx.beginPath();
+    ctx.moveTo(-12, -18);
+    ctx.lineTo(8, -18);
+    ctx.lineTo(12, -14);
+    ctx.lineTo(12, 18);
+    ctx.lineTo(-12, 18);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Folded corner
+    ctx.beginPath();
+    ctx.moveTo(8, -18);
+    ctx.lineTo(8, -14);
+    ctx.lineTo(12, -14);
+    ctx.strokeStyle = '#cccccc';
+    ctx.stroke();
+    ctx.fillStyle = '#f0f0f0';
+    ctx.fill();
+
+    // Lines on paper
+    ctx.strokeStyle = '#888888';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 4; i++) {
+      const y = -8 + i * 6;
+      const width = i === 3 ? 10 : 16;
+      ctx.beginPath();
+      ctx.moveTo(-8, y);
+      ctx.lineTo(-8 + width, y);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+
+    // Create and cache texture
+    this.delegationPaperTexture = new THREE.CanvasTexture(canvas);
+    this.delegationPaperTexture.minFilter = THREE.LinearFilter;
+    this.delegationPaperTexture.magFilter = THREE.LinearFilter;
   }
 
   /**
@@ -320,78 +384,14 @@ export class EffectsManager {
     const bossGroup = this.agentMeshes.get(bossId);
     const subGroup = this.agentMeshes.get(subordinateId);
 
-    if (!bossGroup || !subGroup) {
-      console.log('[EffectsManager] Cannot create delegation effect - missing agent meshes');
+    if (!bossGroup || !subGroup || !this.delegationPaperTexture) {
+      console.log('[EffectsManager] Cannot create delegation effect - missing agent meshes or texture');
       return;
     }
 
-    // Create paper/document sprite
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d')!;
-    canvas.width = 64;
-    canvas.height = 64;
-
-    // Draw paper document icon
-    ctx.fillStyle = '#ffffff';
-    ctx.strokeStyle = '#ffd700'; // Gold border
-    ctx.lineWidth = 2;
-
-    // Paper shape (slightly angled for flying effect)
-    ctx.save();
-    ctx.translate(32, 32);
-    ctx.rotate(-0.2); // Slight rotation for dynamic look
-
-    // Paper body
-    ctx.beginPath();
-    ctx.moveTo(-12, -18);
-    ctx.lineTo(8, -18);
-    ctx.lineTo(12, -14);
-    ctx.lineTo(12, 18);
-    ctx.lineTo(-12, 18);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    // Folded corner
-    ctx.beginPath();
-    ctx.moveTo(8, -18);
-    ctx.lineTo(8, -14);
-    ctx.lineTo(12, -14);
-    ctx.strokeStyle = '#cccccc';
-    ctx.stroke();
-    ctx.fillStyle = '#f0f0f0';
-    ctx.fill();
-
-    // Lines on paper (text simulation)
-    ctx.strokeStyle = '#888888';
-    ctx.lineWidth = 1;
-    for (let i = 0; i < 4; i++) {
-      const y = -8 + i * 6;
-      const width = i === 3 ? 10 : 16; // Last line shorter
-      ctx.beginPath();
-      ctx.moveTo(-8, y);
-      ctx.lineTo(-8 + width, y);
-      ctx.stroke();
-    }
-
-    ctx.restore();
-
-    // Add golden glow around the paper
-    ctx.shadowColor = '#ffd700';
-    ctx.shadowBlur = 8;
-    ctx.beginPath();
-    ctx.arc(32, 32, 20, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(255, 215, 0, 0.1)';
-    ctx.fill();
-
-    // Create sprite
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    texture.needsUpdate = true;
-
+    // Use cached texture (no canvas creation per effect)
     const material = new THREE.SpriteMaterial({
-      map: texture,
+      map: this.delegationPaperTexture,
       transparent: true,
       opacity: 1.0,
       depthTest: false,
@@ -422,7 +422,7 @@ export class EffectsManager {
       startPosition: startPos.clone(),
       endPosition: endPos.clone(),
       startTime: performance.now(),
-      duration: 1200, // 1.2 seconds for the flight
+      duration: 800, // Faster: 0.8 seconds for the flight
     });
   }
 
@@ -793,54 +793,46 @@ export class EffectsManager {
 
   /**
    * Update delegation effects - animate paper flying from boss to subordinate.
+   * Optimized: minimal calculations per frame, no object creation.
    */
   private updateDelegationEffects(now: number): void {
     const toRemove: number[] = [];
 
     for (let i = 0; i < this.delegationEffects.length; i++) {
       const effect = this.delegationEffects[i];
-      const elapsed = now - effect.startTime;
-      const t = Math.min(elapsed / effect.duration, 1);
+      const t = Math.min((now - effect.startTime) / effect.duration, 1);
 
-      // Eased progress for smooth movement
-      const easeOutCubic = 1 - Math.pow(1 - t, 3);
+      // Simple quadratic ease-out (faster than cubic, smoother than linear)
+      const ease = 1 - (1 - t) * (1 - t);
 
-      // Calculate current position with arc trajectory
-      const arcHeight = 1.5; // How high the paper arcs
-      const arcProgress = Math.sin(t * Math.PI); // Peaks in the middle
+      // Direct position calculation (no lerpVectors call)
+      const dx = effect.endPosition.x - effect.startPosition.x;
+      const dy = effect.endPosition.y - effect.startPosition.y;
+      const dz = effect.endPosition.z - effect.startPosition.z;
 
-      effect.sprite.position.lerpVectors(
-        effect.startPosition,
-        effect.endPosition,
-        easeOutCubic
-      );
-      // Add arc height
-      effect.sprite.position.y += arcProgress * arcHeight;
+      // Arc uses simple parabola: 4 * t * (1 - t) peaks at 0.5
+      const arc = 4 * t * (1 - t) * 0.8;
 
-      // Rotation animation - paper tumbles as it flies
-      const rotation = t * Math.PI * 2; // Full rotation during flight
-      effect.sprite.material.rotation = rotation;
+      effect.sprite.position.x = effect.startPosition.x + dx * ease;
+      effect.sprite.position.y = effect.startPosition.y + dy * ease + arc;
+      effect.sprite.position.z = effect.startPosition.z + dz * ease;
 
-      // Scale pulse during flight - paper appears to flutter
-      const flutter = 1 + Math.sin(t * Math.PI * 6) * 0.15;
-      const baseScale = 0.3;
-      effect.sprite.scale.set(baseScale * flutter, baseScale * flutter, 1);
+      // Single rotation over duration
+      effect.sprite.material.rotation = t * Math.PI * 1.5;
 
-      // Fade out at the end
-      const fadeOut = t > 0.8 ? 1 - ((t - 0.8) / 0.2) : 1;
-      effect.sprite.material.opacity = fadeOut;
+      // Fade out last 20%
+      effect.sprite.material.opacity = t > 0.8 ? (1 - t) * 5 : 1;
 
       if (t >= 1) {
         toRemove.push(i);
       }
     }
 
-    // Remove completed effects
+    // Remove completed effects (don't dispose cached texture)
     for (let i = toRemove.length - 1; i >= 0; i--) {
       const idx = toRemove[i];
       const effect = this.delegationEffects[idx];
       this.scene.remove(effect.sprite);
-      effect.sprite.material.map?.dispose();
       effect.sprite.material.dispose();
       this.delegationEffects.splice(idx, 1);
     }
@@ -1003,11 +995,10 @@ export class EffectsManager {
     }
     this.waitingPermissionEffects = [];
 
-    // Clear delegation effects
+    // Clear delegation effects (don't dispose the cached texture)
     for (const effect of this.delegationEffects) {
       this.scene.remove(effect.sprite);
-      effect.sprite.material.map?.dispose();
-      effect.sprite.material.dispose();
+      effect.sprite.material.dispose(); // Only dispose material, not texture
     }
     this.delegationEffects = [];
   }

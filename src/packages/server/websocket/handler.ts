@@ -22,6 +22,11 @@ const clients = new Set<WebSocket>();
 // Track last command sent to each boss agent (for delegation parsing)
 const lastBossCommands = new Map<string, string>();
 
+// Track recently processed delegations to prevent duplicates
+// Key: bossId:agentId:command, Value: timestamp
+const processedDelegations = new Map<string, number>();
+const DELEGATION_DEDUP_WINDOW_MS = 60000; // 1 minute window
+
 // ============================================================================
 // Broadcasting
 // ============================================================================
@@ -1167,7 +1172,7 @@ function setupServiceListeners(): void {
     if (event.type === 'step_complete' && event.resultText) {
       const agent = agentService.getAgent(agentId);
       if (agent?.class === 'boss') {
-        log.log(` Boss ${agent.name} step_complete with resultText (length: ${event.resultText.length})`);
+        log.log(`🟣🟣🟣 step_complete EVENT for boss ${agent.name}, resultText length: ${event.resultText.length}`);
         parseBossDelegation(agentId, agent.name, event.resultText);
         parseBossSpawn(agentId, agent.name, event.resultText);
       }
@@ -1182,6 +1187,7 @@ function setupServiceListeners(): void {
 
   // Helper to parse delegation from boss response (supports single object or array of delegations)
   function parseBossDelegation(agentId: string, bossName: string, resultText: string): void {
+    log.log(`🔴🔴🔴 parseBossDelegation CALLED for boss ${bossName}, resultText length: ${resultText.length}`);
     log.log(` Boss ${bossName} checking for delegation block: ${resultText.includes('```delegation')}`);
 
     // Parse delegation block: ```delegation\n[...]\n``` or ```delegation\n{...}\n```
@@ -1198,9 +1204,30 @@ function setupServiceListeners(): void {
 
         const originalCommand = lastBossCommands.get(agentId) || '';
 
+        // Clean up old entries from dedup map
+        const now = Date.now();
+        for (const [key, timestamp] of processedDelegations) {
+          if (now - timestamp > DELEGATION_DEDUP_WINDOW_MS) {
+            processedDelegations.delete(key);
+          }
+        }
+
         // Process each delegation
         for (const delegationJson of delegations) {
           const taskCommand = delegationJson.taskCommand || originalCommand;
+          const targetAgentId = delegationJson.selectedAgentId;
+
+          // Create dedup key based on boss, target agent, and command
+          const dedupKey = `${agentId}:${targetAgentId}:${taskCommand}`;
+
+          // Check if this delegation was already processed recently
+          if (processedDelegations.has(dedupKey)) {
+            log.log(` SKIPPING duplicate delegation to ${delegationJson.selectedAgentName}: "${taskCommand.slice(0, 50)}..." (already processed)`);
+            continue;
+          }
+
+          // Mark as processed
+          processedDelegations.set(dedupKey, now);
 
           log.log(` Delegation to ${delegationJson.selectedAgentName}: "${taskCommand.slice(0, 80)}..."`);
 
@@ -1220,11 +1247,20 @@ function setupServiceListeners(): void {
           // Store in boss history
           bossService.addDelegationToHistory(agentId, decision);
 
-          // Emit the delegation decision (will trigger auto-forward on frontend)
+          // Broadcast the delegation decision (for UI updates/animations)
           broadcast({
             type: 'delegation_decision',
             payload: decision,
           });
+
+          // Auto-forward the command to the subordinate agent (backend handles this to prevent duplicates)
+          if (decision.selectedAgentId && decision.userCommand) {
+            log.log(`🟢🟢🟢 SENDING COMMAND to ${decision.selectedAgentName} (${decision.selectedAgentId}): "${decision.userCommand.slice(0, 50)}..."`);
+            claudeService.sendCommand(decision.selectedAgentId, decision.userCommand)
+              .catch(err => {
+                log.error(` Failed to auto-forward command to ${decision.selectedAgentName}:`, err);
+              });
+          }
         }
       } catch (err) {
         log.error(` Failed to parse delegation JSON from boss ${bossName}:`, err);

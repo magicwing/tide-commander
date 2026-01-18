@@ -1,5 +1,6 @@
 import type { Agent, ServerMessage, ClientMessage, PermissionRequest, DelegationDecision } from '../../shared/types';
 import { store } from '../store';
+import { perf } from '../utils/profiling';
 
 let ws: WebSocket | null = null;
 let connectionPromise: Promise<void> | null = null;
@@ -167,6 +168,8 @@ export function connect(): void {
 }
 
 function handleServerMessage(message: ServerMessage): void {
+  perf.start(`ws:${message.type}`);
+
   switch (message.type) {
     case 'agents_update': {
       const agentList = message.payload as Agent[];
@@ -439,20 +442,8 @@ function handleServerMessage(message: ServerMessage): void {
           onDelegation?.(decision.bossId, decision.selectedAgentId);
         }
 
-        // Automatically forward the command to the delegated subordinate
-        console.log(`[WS] Checking auto-forward: agentId=${decision.selectedAgentId}, userCommand=${decision.userCommand?.slice(0, 50)}`);
-        if (decision.selectedAgentId && decision.userCommand) {
-          console.log(`[WS] Auto-forwarding command to subordinate ${decision.selectedAgentName}:`, decision.userCommand.slice(0, 50));
-          sendMessage({
-            type: 'send_command',
-            payload: {
-              agentId: decision.selectedAgentId,
-              command: decision.userCommand,
-            },
-          });
-        } else {
-          console.log(`[WS] Auto-forward SKIPPED: missing agentId or userCommand`);
-        }
+        // NOTE: Auto-forward is now handled by the backend to prevent duplicate commands
+        // when multiple clients are connected
       }
       break;
     }
@@ -501,6 +492,8 @@ function handleServerMessage(message: ServerMessage): void {
       break;
     }
   }
+
+  perf.end(`ws:${message.type}`);
 }
 
 // Helper function to handle reconnection

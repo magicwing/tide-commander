@@ -18,6 +18,7 @@ import type {
   DelegationDecision,
 } from '../../shared/types';
 import { ShortcutConfig, DEFAULT_SHORTCUTS } from './shortcuts';
+import { perf } from '../utils/profiling';
 export type { ShortcutConfig } from './shortcuts';
 export { DEFAULT_SHORTCUTS, matchesShortcut, formatShortcut } from './shortcuts';
 
@@ -247,6 +248,7 @@ class Store {
 
   // Agent management
   setAgents(agentList: Agent[]): void {
+    perf.start('store:setAgents');
     // Create a new Map to ensure React detects the change
     const newAgents = new Map<string, Agent>();
     for (const agent of agentList) {
@@ -254,6 +256,7 @@ class Store {
     }
     this.state.agents = newAgents;
     this.notify();
+    perf.end('store:setAgents');
   }
 
   addAgent(agent: Agent): void {
@@ -600,6 +603,7 @@ class Store {
 
   // Claude output management
   addOutput(agentId: string, output: ClaudeOutput): void {
+    perf.start('store:addOutput');
     let outputs = this.state.agentOutputs.get(agentId);
     if (!outputs) {
       outputs = [];
@@ -611,6 +615,7 @@ class Store {
       outputs.shift();
     }
     this.notify();
+    perf.end('store:addOutput');
   }
 
   clearOutputs(agentId: string): void {
