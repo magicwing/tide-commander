@@ -17,6 +17,8 @@ import type {
   PermissionMode,
   PermissionRequest,
   DelegationDecision,
+  Skill,
+  CustomAgentClass,
 } from '../../shared/types';
 import { ShortcutConfig, DEFAULT_SHORTCUTS } from './shortcuts';
 import { perf } from '../utils/profiling';
@@ -135,6 +137,10 @@ export interface StoreState {
   pendingDelegation: { bossId: string; command: string } | null;
   // Track last delegation received per subordinate agent (agentId -> delegation info)
   lastDelegationReceived: Map<string, { bossName: string; taskCommand: string; timestamp: number }>;
+  // Skills
+  skills: Map<string, Skill>;
+  // Custom Agent Classes
+  customAgentClasses: Map<string, CustomAgentClass>;
 }
 
 // Store actions
@@ -216,6 +222,10 @@ class Store {
     delegationHistories: new Map(),
     pendingDelegation: null,
     lastDelegationReceived: new Map(),
+    // Skills
+    skills: new Map(),
+    // Custom Agent Classes
+    customAgentClasses: new Map(),
   };
 
   private listeners = new Set<Listener>();
@@ -653,7 +663,8 @@ class Store {
     position?: { x: number; z: number },
     sessionId?: string,
     useChrome?: boolean,
-    permissionMode?: PermissionMode
+    permissionMode?: PermissionMode,
+    initialSkillIds?: string[]
   ): void {
     console.log('[Store] spawnAgent called with:', {
       name,
@@ -662,13 +673,14 @@ class Store {
       position,
       sessionId,
       useChrome,
-      permissionMode
+      permissionMode,
+      initialSkillIds
     });
 
     const pos3d = position ? { x: position.x, y: 0, z: position.z } : undefined;
     const message = {
       type: 'spawn_agent' as const,
-      payload: { name, class: agentClass, cwd, position: pos3d, sessionId, useChrome, permissionMode },
+      payload: { name, class: agentClass, cwd, position: pos3d, sessionId, useChrome, permissionMode, initialSkillIds },
     };
 
     console.log('[Store] Sending WebSocket message:', message);
@@ -1471,6 +1483,233 @@ class Store {
     return Array.from(this.state.agents.values())
       .filter(agent => agent.class !== 'boss');
   }
+
+  // ============================================================================
+  // Skills Methods
+  // ============================================================================
+
+  /**
+   * Set skills from server (called when receiving skills_update message)
+   */
+  setSkillsFromServer(skillsArray: Skill[]): void {
+    const newSkills = new Map<string, Skill>();
+    for (const skill of skillsArray) {
+      newSkills.set(skill.id, skill);
+    }
+    this.state.skills = newSkills;
+    this.notify();
+  }
+
+  /**
+   * Add a skill from server event
+   */
+  addSkillFromServer(skill: Skill): void {
+    const newSkills = new Map(this.state.skills);
+    newSkills.set(skill.id, skill);
+    this.state.skills = newSkills;
+    this.notify();
+  }
+
+  /**
+   * Update a skill from server event
+   */
+  updateSkillFromServer(skill: Skill): void {
+    const newSkills = new Map(this.state.skills);
+    newSkills.set(skill.id, skill);
+    this.state.skills = newSkills;
+    this.notify();
+  }
+
+  /**
+   * Remove a skill from server event
+   */
+  removeSkillFromServer(skillId: string): void {
+    const newSkills = new Map(this.state.skills);
+    newSkills.delete(skillId);
+    this.state.skills = newSkills;
+    this.notify();
+  }
+
+  /**
+   * Get a skill by ID
+   */
+  getSkill(skillId: string): Skill | undefined {
+    return this.state.skills.get(skillId);
+  }
+
+  /**
+   * Get all skills
+   */
+  getAllSkills(): Skill[] {
+    return Array.from(this.state.skills.values());
+  }
+
+  /**
+   * Get skills assigned to a specific agent
+   */
+  getSkillsForAgent(agentId: string): Skill[] {
+    const agent = this.state.agents.get(agentId);
+    if (!agent) return [];
+
+    return Array.from(this.state.skills.values()).filter(skill => {
+      if (!skill.enabled) return false;
+      // Direct assignment
+      if (skill.assignedAgentIds.includes(agentId)) return true;
+      // Class assignment
+      if (skill.assignedAgentClasses.includes(agent.class)) return true;
+      return false;
+    });
+  }
+
+  /**
+   * Create a new skill
+   */
+  createSkill(skillData: Omit<Skill, 'id' | 'createdAt' | 'updatedAt'>): void {
+    this.sendMessage?.({
+      type: 'create_skill',
+      payload: skillData,
+    });
+  }
+
+  /**
+   * Update an existing skill
+   */
+  updateSkill(skillId: string, updates: Partial<Skill>): void {
+    this.sendMessage?.({
+      type: 'update_skill',
+      payload: { id: skillId, updates },
+    });
+  }
+
+  /**
+   * Delete a skill
+   */
+  deleteSkill(skillId: string): void {
+    this.sendMessage?.({
+      type: 'delete_skill',
+      payload: { id: skillId },
+    });
+  }
+
+  /**
+   * Assign a skill to an agent
+   */
+  assignSkillToAgent(skillId: string, agentId: string): void {
+    this.sendMessage?.({
+      type: 'assign_skill',
+      payload: { skillId, agentId },
+    });
+  }
+
+  /**
+   * Unassign a skill from an agent
+   */
+  unassignSkillFromAgent(skillId: string, agentId: string): void {
+    this.sendMessage?.({
+      type: 'unassign_skill',
+      payload: { skillId, agentId },
+    });
+  }
+
+  /**
+   * Request skills for an agent from the server
+   */
+  requestAgentSkills(agentId: string): void {
+    this.sendMessage?.({
+      type: 'request_agent_skills',
+      payload: { agentId },
+    });
+  }
+
+  // ============================================================================
+  // Custom Agent Classes
+  // ============================================================================
+
+  /**
+   * Set custom agent classes from server
+   */
+  setCustomAgentClassesFromServer(classesArray: CustomAgentClass[]): void {
+    const newClasses = new Map<string, CustomAgentClass>();
+    for (const customClass of classesArray) {
+      newClasses.set(customClass.id, customClass);
+    }
+    this.state.customAgentClasses = newClasses;
+    this.notify();
+  }
+
+  /**
+   * Add a custom agent class from server event
+   */
+  addCustomAgentClassFromServer(customClass: CustomAgentClass): void {
+    const newClasses = new Map(this.state.customAgentClasses);
+    newClasses.set(customClass.id, customClass);
+    this.state.customAgentClasses = newClasses;
+    this.notify();
+  }
+
+  /**
+   * Update a custom agent class from server event
+   */
+  updateCustomAgentClassFromServer(customClass: CustomAgentClass): void {
+    const newClasses = new Map(this.state.customAgentClasses);
+    newClasses.set(customClass.id, customClass);
+    this.state.customAgentClasses = newClasses;
+    this.notify();
+  }
+
+  /**
+   * Remove a custom agent class from server event
+   */
+  removeCustomAgentClassFromServer(classId: string): void {
+    const newClasses = new Map(this.state.customAgentClasses);
+    newClasses.delete(classId);
+    this.state.customAgentClasses = newClasses;
+    this.notify();
+  }
+
+  /**
+   * Get a custom agent class by ID
+   */
+  getCustomAgentClass(classId: string): CustomAgentClass | undefined {
+    return this.state.customAgentClasses.get(classId);
+  }
+
+  /**
+   * Get all custom agent classes
+   */
+  getAllCustomAgentClasses(): CustomAgentClass[] {
+    return Array.from(this.state.customAgentClasses.values());
+  }
+
+  /**
+   * Create a new custom agent class
+   */
+  createCustomAgentClass(classData: Omit<CustomAgentClass, 'id' | 'createdAt' | 'updatedAt'>): void {
+    this.sendMessage?.({
+      type: 'create_custom_agent_class',
+      payload: classData,
+    });
+  }
+
+  /**
+   * Update an existing custom agent class
+   */
+  updateCustomAgentClass(classId: string, updates: Partial<CustomAgentClass>): void {
+    this.sendMessage?.({
+      type: 'update_custom_agent_class',
+      payload: { id: classId, updates },
+    });
+  }
+
+  /**
+   * Delete a custom agent class
+   */
+  deleteCustomAgentClass(classId: string): void {
+    this.sendMessage?.({
+      type: 'delete_custom_agent_class',
+      payload: { id: classId },
+    });
+  }
 }
 
 // Singleton store instance
@@ -1962,5 +2201,108 @@ export function useFileChanges(): FileChange[] {
   return useSelector(
     useCallback((state: StoreState) => state.fileChanges, []),
     shallowArrayEqual
+  );
+}
+
+// ============================================================================
+// SKILL SELECTORS
+// ============================================================================
+
+/**
+ * Get all skills. Only re-renders when skills change.
+ */
+export function useSkills(): Map<string, Skill> {
+  return useSelector(
+    useCallback((state: StoreState) => state.skills, []),
+    shallowMapEqual
+  );
+}
+
+/**
+ * Get all skills as an array. Only re-renders when skills change.
+ */
+export function useSkillsArray(): Skill[] {
+  const skills = useSkills();
+  const arrayRef = useRef<Skill[]>([]);
+
+  const newArray = Array.from(skills.values());
+  if (!shallowArrayEqual(arrayRef.current, newArray)) {
+    arrayRef.current = newArray;
+  }
+  return arrayRef.current;
+}
+
+/**
+ * Get a single skill by ID. Only re-renders when that specific skill changes.
+ */
+export function useSkill(skillId: string | null): Skill | undefined {
+  return useSelector(
+    useCallback(
+      (state: StoreState) => skillId ? state.skills.get(skillId) : undefined,
+      [skillId]
+    )
+  );
+}
+
+/**
+ * Get skills assigned to a specific agent.
+ */
+export function useAgentSkills(agentId: string | null): Skill[] {
+  const emptyArray = useRef<Skill[]>([]);
+  const agents = useAgents();
+  const skills = useSkills();
+
+  if (!agentId) return emptyArray.current;
+
+  const agent = agents.get(agentId);
+  if (!agent) return emptyArray.current;
+
+  const matchingSkills = Array.from(skills.values()).filter(skill => {
+    if (!skill.enabled) return false;
+    if (skill.assignedAgentIds.includes(agentId)) return true;
+    if (skill.assignedAgentClasses.includes(agent.class)) return true;
+    return false;
+  });
+
+  return matchingSkills;
+}
+
+// ============================================================================
+// CUSTOM AGENT CLASS SELECTORS
+// ============================================================================
+
+/**
+ * Get all custom agent classes. Only re-renders when custom classes change.
+ */
+export function useCustomAgentClasses(): Map<string, CustomAgentClass> {
+  return useSelector(
+    useCallback((state: StoreState) => state.customAgentClasses, []),
+    shallowMapEqual
+  );
+}
+
+/**
+ * Get all custom agent classes as an array. Only re-renders when custom classes change.
+ */
+export function useCustomAgentClassesArray(): CustomAgentClass[] {
+  const classes = useCustomAgentClasses();
+  const arrayRef = useRef<CustomAgentClass[]>([]);
+
+  const newArray = Array.from(classes.values());
+  if (!shallowArrayEqual(arrayRef.current, newArray)) {
+    arrayRef.current = newArray;
+  }
+  return arrayRef.current;
+}
+
+/**
+ * Get a single custom agent class by ID. Only re-renders when that specific class changes.
+ */
+export function useCustomAgentClass(classId: string | null): CustomAgentClass | undefined {
+  return useSelector(
+    useCallback(
+      (state: StoreState) => classId ? state.customAgentClasses.get(classId) : undefined,
+      [classId]
+    )
   );
 }

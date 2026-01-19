@@ -1,7 +1,10 @@
-// Agent Classes
-export type AgentClass = 'scout' | 'builder' | 'debugger' | 'architect' | 'warrior' | 'support' | 'boss';
+// Agent Classes - built-in types
+export type BuiltInAgentClass = 'scout' | 'builder' | 'debugger' | 'architect' | 'warrior' | 'support' | 'boss';
 
-export const AGENT_CLASSES: Record<AgentClass, { icon: string; color: string; description: string }> = {
+// AgentClass can be a built-in class or a custom class slug
+export type AgentClass = BuiltInAgentClass | string;
+
+export const BUILT_IN_AGENT_CLASSES: Record<BuiltInAgentClass, { icon: string; color: string; description: string }> = {
   scout: { icon: '🔍', color: '#4a9eff', description: 'Codebase exploration, file discovery' },
   builder: { icon: '🔨', color: '#ff9e4a', description: 'Feature implementation, writing code' },
   debugger: { icon: '🐛', color: '#ff4a4a', description: 'Bug hunting, fixing issues' },
@@ -10,6 +13,22 @@ export const AGENT_CLASSES: Record<AgentClass, { icon: string; color: string; de
   support: { icon: '💚', color: '#4aff9e', description: 'Documentation, tests, cleanup' },
   boss: { icon: '👑', color: '#ffd700', description: 'Team leader, delegates tasks to subordinates' },
 };
+
+// For backwards compatibility
+export const AGENT_CLASSES = BUILT_IN_AGENT_CLASSES;
+
+// Custom Agent Class - user-defined agent types with associated skills
+export interface CustomAgentClass {
+  id: string;           // Unique identifier (slug)
+  name: string;         // Display name
+  icon: string;         // Emoji or icon
+  color: string;        // Hex color
+  description: string;  // What this class does
+  defaultSkillIds: string[];  // Skills automatically assigned to agents of this class
+  model?: string;       // Character model file (e.g., 'character-male-a.glb') - defaults to 'character-male-a.glb'
+  createdAt: number;
+  updatedAt: number;
+}
 
 // Agent Status
 // 'orphaned' = tmux session has active Claude process but agent state is out of sync (e.g., shows idle when actually working)
@@ -202,7 +221,59 @@ export type ToolName =
   | 'Task'
   | 'TodoWrite'
   | 'AskUserQuestion'
-  | 'NotebookEdit';
+  | 'NotebookEdit'
+  | 'Skill';
+
+// ============================================================================
+// Skills Types
+// ============================================================================
+
+/**
+ * Skill - A reusable capability that can be assigned to agents
+ *
+ * Skills define specific actions/capabilities that agents can perform.
+ * They are stored as markdown content that gets injected into the agent's
+ * system prompt when assigned, teaching the agent how to perform specific tasks.
+ *
+ * Based on Claude Code's skill system (.claude/skills/<name>/SKILL.md)
+ */
+export interface Skill {
+  id: string;
+  name: string;                    // Display name (e.g., "Git Push")
+  slug: string;                    // URL-safe identifier (e.g., "git-push")
+  description: string;             // When to use this skill (for model matching)
+  content: string;                 // Markdown content with instructions
+
+  // Tool permissions - tools the skill is allowed to use without prompting
+  // Format: "Bash(git:*)", "Read", "Edit", etc.
+  allowedTools: string[];
+
+  // Optional settings
+  model?: string;                  // Specific model to use (e.g., "claude-sonnet-4-20250514")
+  context?: 'fork' | 'inline';     // Fork runs in isolated sub-agent, inline in main context
+
+  // Assignment tracking
+  assignedAgentIds: string[];      // Agents this skill is assigned to
+  assignedAgentClasses: AgentClass[]; // Agent classes that automatically get this skill
+
+  // Metadata
+  enabled: boolean;                // Can be disabled without deleting
+  createdAt: number;
+  updatedAt: number;
+}
+
+// Stored skill (on disk) - same as Skill but explicitly typed
+export interface StoredSkill extends Skill {}
+
+// Skill summary for UI lists
+export interface SkillSummary {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  enabled: boolean;
+  assignedCount: number;           // Number of agents using this skill
+}
 
 // Events from Claude Code hooks
 export interface BaseEvent {
@@ -301,6 +372,7 @@ export interface SpawnAgentMessage extends WSMessage {
     sessionId?: string;
     useChrome?: boolean;
     permissionMode?: PermissionMode; // defaults to 'bypass' for backwards compatibility
+    initialSkillIds?: string[]; // Skills to assign on creation
   };
 }
 
@@ -751,6 +823,133 @@ export interface BossSpawnedAgentMessage extends WSMessage {
   };
 }
 
+// ============================================================================
+// Skill WebSocket Messages
+// ============================================================================
+
+// Skills sync message (Server -> Client) - sent on connect and when skills change
+export interface SkillsUpdateMessage extends WSMessage {
+  type: 'skills_update';
+  payload: Skill[];
+}
+
+// Skill created message (Server -> Client)
+export interface SkillCreatedMessage extends WSMessage {
+  type: 'skill_created';
+  payload: Skill;
+}
+
+// Skill updated message (Server -> Client)
+export interface SkillUpdatedMessage extends WSMessage {
+  type: 'skill_updated';
+  payload: Skill;
+}
+
+// Skill deleted message (Server -> Client)
+export interface SkillDeletedMessage extends WSMessage {
+  type: 'skill_deleted';
+  payload: { id: string };
+}
+
+// Create skill message (Client -> Server)
+export interface CreateSkillMessage extends WSMessage {
+  type: 'create_skill';
+  payload: Omit<Skill, 'id' | 'createdAt' | 'updatedAt'>;
+}
+
+// Update skill message (Client -> Server)
+export interface UpdateSkillMessage extends WSMessage {
+  type: 'update_skill';
+  payload: { id: string; updates: Partial<Skill> };
+}
+
+// Delete skill message (Client -> Server)
+export interface DeleteSkillMessage extends WSMessage {
+  type: 'delete_skill';
+  payload: { id: string };
+}
+
+// Assign skill to agent (Client -> Server)
+export interface AssignSkillMessage extends WSMessage {
+  type: 'assign_skill';
+  payload: {
+    skillId: string;
+    agentId: string;
+  };
+}
+
+// Unassign skill from agent (Client -> Server)
+export interface UnassignSkillMessage extends WSMessage {
+  type: 'unassign_skill';
+  payload: {
+    skillId: string;
+    agentId: string;
+  };
+}
+
+// Request skills for an agent (Client -> Server)
+export interface RequestAgentSkillsMessage extends WSMessage {
+  type: 'request_agent_skills';
+  payload: {
+    agentId: string;
+  };
+}
+
+// Agent skills response (Server -> Client)
+export interface AgentSkillsMessage extends WSMessage {
+  type: 'agent_skills';
+  payload: {
+    agentId: string;
+    skills: Skill[];
+  };
+}
+
+// ============================================================================
+// Custom Agent Class WebSocket Messages
+// ============================================================================
+
+// Custom agent classes sync message (Server -> Client)
+export interface CustomAgentClassesUpdateMessage extends WSMessage {
+  type: 'custom_agent_classes_update';
+  payload: CustomAgentClass[];
+}
+
+// Custom agent class created message (Server -> Client)
+export interface CustomAgentClassCreatedMessage extends WSMessage {
+  type: 'custom_agent_class_created';
+  payload: CustomAgentClass;
+}
+
+// Custom agent class updated message (Server -> Client)
+export interface CustomAgentClassUpdatedMessage extends WSMessage {
+  type: 'custom_agent_class_updated';
+  payload: CustomAgentClass;
+}
+
+// Custom agent class deleted message (Server -> Client)
+export interface CustomAgentClassDeletedMessage extends WSMessage {
+  type: 'custom_agent_class_deleted';
+  payload: { id: string };
+}
+
+// Create custom agent class message (Client -> Server)
+export interface CreateCustomAgentClassMessage extends WSMessage {
+  type: 'create_custom_agent_class';
+  payload: Omit<CustomAgentClass, 'id' | 'createdAt' | 'updatedAt'>;
+}
+
+// Update custom agent class message (Client -> Server)
+export interface UpdateCustomAgentClassMessage extends WSMessage {
+  type: 'update_custom_agent_class';
+  payload: { id: string; updates: Partial<CustomAgentClass> };
+}
+
+// Delete custom agent class message (Client -> Server)
+export interface DeleteCustomAgentClassMessage extends WSMessage {
+  type: 'delete_custom_agent_class';
+  payload: { id: string };
+}
+
 export type ServerMessage =
   | AgentsUpdateMessage
   | AgentCreatedMessage
@@ -778,7 +977,16 @@ export type ServerMessage =
   | DelegationDecisionMessage
   | BossSubordinatesUpdatedMessage
   | DelegationHistoryMessage
-  | BossSpawnedAgentMessage;
+  | BossSpawnedAgentMessage
+  | SkillsUpdateMessage
+  | SkillCreatedMessage
+  | SkillUpdatedMessage
+  | SkillDeletedMessage
+  | AgentSkillsMessage
+  | CustomAgentClassesUpdateMessage
+  | CustomAgentClassCreatedMessage
+  | CustomAgentClassUpdatedMessage
+  | CustomAgentClassDeletedMessage;
 
 export type ClientMessage =
   | SpawnAgentMessage
@@ -805,4 +1013,13 @@ export type ClientMessage =
   | AssignSubordinatesMessage
   | RemoveSubordinateMessage
   | SendBossCommandMessage
-  | RequestDelegationHistoryMessage;
+  | RequestDelegationHistoryMessage
+  | CreateSkillMessage
+  | UpdateSkillMessage
+  | DeleteSkillMessage
+  | AssignSkillMessage
+  | UnassignSkillMessage
+  | RequestAgentSkillsMessage
+  | CreateCustomAgentClassMessage
+  | UpdateCustomAgentClassMessage
+  | DeleteCustomAgentClassMessage;

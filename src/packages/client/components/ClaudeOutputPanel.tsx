@@ -54,6 +54,7 @@ const DEFAULT_TERMINAL_HEIGHT = 55; // percentage
 const MIN_TERMINAL_HEIGHT = 20; // percentage
 const MAX_TERMINAL_HEIGHT = 85; // percentage
 const TERMINAL_HEIGHT_KEY = 'guake-terminal-height';
+const INPUT_TEXT_KEY_PREFIX = 'guake-input-'; // Per-agent input text persistence
 
 interface HistoryMessage {
   type: 'user' | 'assistant' | 'tool_use' | 'tool_result';
@@ -430,11 +431,17 @@ export function ClaudeOutputPanel() {
     ? store.getPendingPermissionsForAgent(selectedAgentId)
     : [];
 
-  // Per-agent state getters/setters
+  // Per-agent state getters/setters (input text persisted to localStorage)
   const command = selectedAgentId ? (agentCommands.get(selectedAgentId) || '') : '';
   const setCommand = (value: string) => {
     if (!selectedAgentId) return;
     setAgentCommands(prev => new Map(prev).set(selectedAgentId, value));
+    // Persist to localStorage
+    if (value) {
+      localStorage.setItem(`${INPUT_TEXT_KEY_PREFIX}${selectedAgentId}`, value);
+    } else {
+      localStorage.removeItem(`${INPUT_TEXT_KEY_PREFIX}${selectedAgentId}`);
+    }
   };
 
   const forceTextarea = selectedAgentId ? (agentForceTextarea.get(selectedAgentId) || false) : false;
@@ -750,6 +757,18 @@ export function ClaudeOutputPanel() {
       document.removeEventListener('mouseup', handleMouseUp);
     };
   }, []); // No dependencies - listeners are registered once
+
+  // Load saved input text from localStorage when switching agents
+  useEffect(() => {
+    if (!selectedAgentId) return;
+    // Only load from localStorage if we don't have a value in state yet
+    if (!agentCommands.has(selectedAgentId)) {
+      const saved = localStorage.getItem(`${INPUT_TEXT_KEY_PREFIX}${selectedAgentId}`);
+      if (saved) {
+        setAgentCommands(prev => new Map(prev).set(selectedAgentId, saved));
+      }
+    }
+  }, [selectedAgentId]);
 
   // Focus input when terminal opens or switches to textarea
   useEffect(() => {

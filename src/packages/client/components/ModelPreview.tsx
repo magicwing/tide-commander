@@ -12,6 +12,7 @@ const STATUS_ANIMATIONS: Record<AgentStatus, string> = {
   waiting_permission: 'idle', // Waiting for permission approval
   error: 'emote-no',    // Something went wrong
   offline: 'static',    // Not connected
+  orphaned: 'idle',     // Out-of-sync process
 };
 
 // Color mapping for status indicator
@@ -22,16 +23,18 @@ const STATUS_COLORS: Record<AgentStatus, number> = {
   waiting_permission: 0xffcc00, // Yellow/gold - awaiting permission
   error: 0xff4a4a,    // Red - error
   offline: 0x888888,  // Gray - offline
+  orphaned: 0xff9e4a, // Orange - orphaned process
 };
 
 interface ModelPreviewProps {
-  agentClass: AgentClass;
+  agentClass?: AgentClass;
+  modelFile?: string;  // Direct model file (e.g., 'character-male-a.glb')
   status?: AgentStatus;
   width?: number;
   height?: number;
 }
 
-export function ModelPreview({ agentClass, status = 'idle', width = 150, height = 200 }: ModelPreviewProps) {
+export function ModelPreview({ agentClass, modelFile, status = 'idle', width = 150, height = 200 }: ModelPreviewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -146,16 +149,17 @@ export function ModelPreview({ agentClass, status = 'idle', width = 150, height 
     };
   }, [width, height]);
 
-  // Load model when agentClass changes or when ready
+  // Load model when agentClass/modelFile changes or when ready
   useEffect(() => {
     if (!isReady || !sceneRef.current) return;
 
     const scene = sceneRef.current;
-    const modelFile = AGENT_CLASS_MODELS[agentClass];
+    // Use direct modelFile if provided, otherwise look up from agent class
+    const resolvedModelFile = modelFile || (agentClass ? AGENT_CLASS_MODELS[agentClass] : 'character-male-a.glb');
     const loader = new GLTFLoader();
 
     loader.load(
-      `/assets/characters/${modelFile}`,
+      `/assets/characters/${resolvedModelFile}`,
       (gltf) => {
         // Remove previous model
         if (modelRef.current && sceneRef.current) {
@@ -191,10 +195,10 @@ export function ModelPreview({ agentClass, status = 'idle', width = 150, height 
       },
       undefined,
       (error) => {
-        console.error('[ModelPreview] Failed to load model:', modelFile, error);
+        console.error('[ModelPreview] Failed to load model:', resolvedModelFile, error);
       }
     );
-  }, [agentClass, isReady]);
+  }, [agentClass, modelFile, isReady]);
 
   // Helper function to play animation for a status
   const playStatusAnimation = (currentStatus: AgentStatus) => {

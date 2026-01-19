@@ -33,14 +33,14 @@ export function FPSMeter({ visible = true, position = 'top-right' }: FPSMeterPro
 
   // Calculate total agent RAM usage
   const agentMemoryStats = useMemo(() => {
-    const agentsWithMemory = agents.filter(a => a.memoryUsageMB !== undefined && a.memoryUsageMB > 0);
-    const totalMB = agentsWithMemory.reduce((sum, a) => sum + (a.memoryUsageMB || 0), 0);
+    const agentsWithMemory = agents.filter(a => (a as any).memoryUsageMB !== undefined && (a as any).memoryUsageMB > 0);
+    const totalMB = agentsWithMemory.reduce((sum, a) => sum + ((a as any).memoryUsageMB || 0), 0);
     return {
       totalMB,
       agentCount: agentsWithMemory.length,
       agents: agentsWithMemory.map(a => ({
         name: a.name,
-        memoryMB: a.memoryUsageMB || 0,
+        memoryMB: (a as any).memoryUsageMB || 0,
         status: a.status,
       })).sort((a, b) => b.memoryMB - a.memoryMB), // Sort by memory usage desc
     };

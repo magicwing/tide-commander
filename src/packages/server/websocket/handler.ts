@@ -6,9 +6,9 @@
 import { Server as HttpServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import * as fs from 'fs';
-import type { Agent, AgentClass, ClientMessage, ServerMessage, DrawingArea, Building, PermissionRequest, DelegationDecision } from '../../shared/types.js';
+import type { Agent, AgentClass, ClientMessage, ServerMessage, DrawingArea, Building, PermissionRequest, DelegationDecision, Skill, CustomAgentClass } from '../../shared/types.js';
 import { BOSS_CONTEXT_START, BOSS_CONTEXT_END } from '../../shared/types.js';
-import { agentService, claudeService, supervisorService, permissionService, bossService } from '../services/index.js';
+import { agentService, claudeService, supervisorService, permissionService, bossService, skillService, customClassService } from '../services/index.js';
 import { loadAreas, saveAreas, loadBuildings, saveBuildings } from '../data/index.js';
 import { loadSession, loadToolHistory } from '../claude/session-loader.js';
 import { logger, createLogger } from '../utils/logger.js';
@@ -113,6 +113,7 @@ function handleClientMessage(ws: WebSocket, message: ClientMessage): void {
         useChrome: message.payload.useChrome,
         permissionMode: message.payload.permissionMode,
         position: message.payload.position,
+        initialSkillIds: message.payload.initialSkillIds,
       });
 
       agentService
@@ -132,6 +133,20 @@ function handleClientMessage(ws: WebSocket, message: ClientMessage): void {
             class: agent.class,
             sessionId: agent.sessionId,
           });
+
+          // Assign initial skills if provided
+          const initialSkillIds = message.payload.initialSkillIds || [];
+
+          // Also get default skills from custom class if applicable
+          const classDefaultSkills = customClassService.getClassDefaultSkillIds(agent.class);
+          const allSkillIds = [...new Set([...initialSkillIds, ...classDefaultSkills])];
+
+          if (allSkillIds.length > 0) {
+            log.log(`📦 [SPAWN_AGENT] Assigning ${allSkillIds.length} skills to ${agent.name}`);
+            for (const skillId of allSkillIds) {
+              skillService.assignSkillToAgent(skillId, agent.id);
+            }
+          }
 
           const createMessage = {
             type: 'agent_created' as const,
@@ -582,6 +597,251 @@ function handleClientMessage(ws: WebSocket, message: ClientMessage): void {
         );
       }
       break;
+
+    // ========================================================================
+    // Skill Messages
+    // ========================================================================
+
+    case 'create_skill':
+      try {
+        const skill = skillService.createSkill(message.payload);
+        broadcast({
+          type: 'skill_created',
+          payload: skill,
+        });
+        log.log(` Created skill: ${skill.name} (${skill.id})`);
+      } catch (err: any) {
+        log.error(' Failed to create skill:', err);
+        ws.send(
+          JSON.stringify({
+            type: 'error',
+            payload: { message: err.message },
+          })
+        );
+      }
+      break;
+
+    case 'update_skill':
+      try {
+        const skill = skillService.updateSkill(message.payload.id, message.payload.updates);
+        if (skill) {
+          broadcast({
+            type: 'skill_updated',
+            payload: skill,
+          });
+          log.log(` Updated skill: ${skill.name} (${skill.id})`);
+        } else {
+          ws.send(
+            JSON.stringify({
+              type: 'error',
+              payload: { message: `Skill not found: ${message.payload.id}` },
+            })
+          );
+        }
+      } catch (err: any) {
+        log.error(' Failed to update skill:', err);
+        ws.send(
+          JSON.stringify({
+            type: 'error',
+            payload: { message: err.message },
+          })
+        );
+      }
+      break;
+
+    case 'delete_skill':
+      try {
+        const deleted = skillService.deleteSkill(message.payload.id);
+        if (deleted) {
+          broadcast({
+            type: 'skill_deleted',
+            payload: { id: message.payload.id },
+          });
+          log.log(` Deleted skill: ${message.payload.id}`);
+        } else {
+          ws.send(
+            JSON.stringify({
+              type: 'error',
+              payload: { message: `Skill not found: ${message.payload.id}` },
+            })
+          );
+        }
+      } catch (err: any) {
+        log.error(' Failed to delete skill:', err);
+        ws.send(
+          JSON.stringify({
+            type: 'error',
+            payload: { message: err.message },
+          })
+        );
+      }
+      break;
+
+    case 'assign_skill':
+      try {
+        const skill = skillService.assignSkillToAgent(
+          message.payload.skillId,
+          message.payload.agentId
+        );
+        if (skill) {
+          broadcast({
+            type: 'skill_updated',
+            payload: skill,
+          });
+          log.log(` Assigned skill ${skill.name} to agent ${message.payload.agentId}`);
+        } else {
+          ws.send(
+            JSON.stringify({
+              type: 'error',
+              payload: { message: `Skill not found: ${message.payload.skillId}` },
+            })
+          );
+        }
+      } catch (err: any) {
+        log.error(' Failed to assign skill:', err);
+        ws.send(
+          JSON.stringify({
+            type: 'error',
+            payload: { message: err.message },
+          })
+        );
+      }
+      break;
+
+    case 'unassign_skill':
+      try {
+        const skill = skillService.unassignSkillFromAgent(
+          message.payload.skillId,
+          message.payload.agentId
+        );
+        if (skill) {
+          broadcast({
+            type: 'skill_updated',
+            payload: skill,
+          });
+          log.log(` Unassigned skill ${skill.name} from agent ${message.payload.agentId}`);
+        } else {
+          ws.send(
+            JSON.stringify({
+              type: 'error',
+              payload: { message: `Skill not found: ${message.payload.skillId}` },
+            })
+          );
+        }
+      } catch (err: any) {
+        log.error(' Failed to unassign skill:', err);
+        ws.send(
+          JSON.stringify({
+            type: 'error',
+            payload: { message: err.message },
+          })
+        );
+      }
+      break;
+
+    case 'request_agent_skills':
+      {
+        const agent = agentService.getAgent(message.payload.agentId);
+        if (agent) {
+          const skills = skillService.getSkillsForAgent(agent.id, agent.class);
+          ws.send(
+            JSON.stringify({
+              type: 'agent_skills',
+              payload: {
+                agentId: message.payload.agentId,
+                skills,
+              },
+            })
+          );
+        } else {
+          ws.send(
+            JSON.stringify({
+              type: 'error',
+              payload: { message: `Agent not found: ${message.payload.agentId}` },
+            })
+          );
+        }
+      }
+      break;
+
+    // ========================================================================
+    // Custom Agent Class Messages
+    // ========================================================================
+
+    case 'create_custom_agent_class':
+      try {
+        const customClass = customClassService.createCustomClass(message.payload);
+        broadcast({
+          type: 'custom_agent_class_created',
+          payload: customClass,
+        });
+        log.log(` Created custom agent class: ${customClass.name} (${customClass.id})`);
+      } catch (err: any) {
+        log.error(' Failed to create custom agent class:', err);
+        ws.send(
+          JSON.stringify({
+            type: 'error',
+            payload: { message: err.message },
+          })
+        );
+      }
+      break;
+
+    case 'update_custom_agent_class':
+      try {
+        const customClass = customClassService.updateCustomClass(message.payload.id, message.payload.updates);
+        if (customClass) {
+          broadcast({
+            type: 'custom_agent_class_updated',
+            payload: customClass,
+          });
+          log.log(` Updated custom agent class: ${customClass.name} (${customClass.id})`);
+        } else {
+          ws.send(
+            JSON.stringify({
+              type: 'error',
+              payload: { message: `Custom agent class not found: ${message.payload.id}` },
+            })
+          );
+        }
+      } catch (err: any) {
+        log.error(' Failed to update custom agent class:', err);
+        ws.send(
+          JSON.stringify({
+            type: 'error',
+            payload: { message: err.message },
+          })
+        );
+      }
+      break;
+
+    case 'delete_custom_agent_class':
+      try {
+        const deleted = customClassService.deleteCustomClass(message.payload.id);
+        if (deleted) {
+          broadcast({
+            type: 'custom_agent_class_deleted',
+            payload: { id: message.payload.id },
+          });
+          log.log(` Deleted custom agent class: ${message.payload.id}`);
+        } else {
+          ws.send(
+            JSON.stringify({
+              type: 'error',
+              payload: { message: `Custom agent class not found: ${message.payload.id}` },
+            })
+          );
+        }
+      } catch (err: any) {
+        log.error(' Failed to delete custom agent class:', err);
+        ws.send(
+          JSON.stringify({
+            type: 'error',
+            payload: { message: err.message },
+          })
+        );
+      }
+      break;
   }
 }
 
@@ -885,7 +1145,7 @@ async function buildBossContext(bossId: string): Promise<string | null> {
       }
     }
 
-    // Build supervisor status updates (last 3 with FULL details like in Supervisor Status panel)
+    // Build supervisor status updates (last 3 with FULL details)
     let supervisorUpdates = '';
     if (history.entries && history.entries.length > 0) {
       const updates = history.entries.slice(0, 3).map((entry) => {
@@ -901,32 +1161,21 @@ async function buildBossContext(bossId: string): Promise<string | null> {
         const lines: string[] = [];
         lines.push(`#### ${progressEmoji} [${timeSince} ago] ${analysis?.statusDescription || 'No status'}`);
 
-        // Add the detailed work summary
         if (analysis?.recentWorkSummary) {
           lines.push(`> 📝 ${analysis.recentWorkSummary}`);
         }
-
-        // Add current focus if different from status
         if (analysis?.currentFocus && analysis.currentFocus !== analysis.statusDescription) {
           lines.push(`> 🎯 **Focus**: ${analysis.currentFocus}`);
         }
-
-        // Add blockers
         if (analysis?.blockers && analysis.blockers.length > 0) {
           lines.push(`> 🚧 **Blockers**: ${analysis.blockers.join(', ')}`);
         }
-
-        // Add suggestions
         if (analysis?.suggestions && analysis.suggestions.length > 0) {
           lines.push(`> 💡 **Suggestions**: ${analysis.suggestions.join('; ')}`);
         }
-
-        // Add modified files
         if (analysis?.filesModified && analysis.filesModified.length > 0) {
           lines.push(`> 📁 **Files**: ${analysis.filesModified.slice(0, 5).join(', ')}`);
         }
-
-        // Add concerns
         if (analysis?.concerns && analysis.concerns.length > 0) {
           lines.push(`> ⚠️ **Concerns**: ${analysis.concerns.join('; ')}`);
         }
@@ -959,20 +1208,6 @@ ${subordinateDetails.join('\n\n')}
 
 # RECENT DELEGATION HISTORY
 ${delegationSummary}`;
-}
-
-/**
- * Format time since a timestamp (e.g., "5 minutes", "2 hours")
- */
-function formatTimeSince(timestamp: number): string {
-  const seconds = Math.floor((Date.now() - timestamp) / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ${minutes % 60}m`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ${hours % 24}h`;
 }
 
 /**
@@ -1096,54 +1331,16 @@ You can ONLY spawn new agents when the user EXPLICITLY requests it.
 Include at the END of your response (can be combined with delegation):
 
 \`\`\`spawn
-[
-  {
-    "name": "<agent name>",
-    "class": "<scout|builder|debugger|architect|warrior|support>",
-    "cwd": "<optional: working directory, defaults to your cwd>"
-  }
-]
+[{"name": "<Agent Name>", "class": "<agent class>", "cwd": "<optional working directory>"}]
 \`\`\`
 
-### Agent Classes:
-- **scout**: Codebase exploration, file discovery
-- **builder**: Feature implementation, writing code
-- **debugger**: Bug hunting, fixing issues
+Valid classes:
+- **scout**: Exploration, finding files, understanding codebase
+- **builder**: Implementing features, writing new code
+- **debugger**: Fixing bugs, debugging issues
 - **architect**: Planning, design decisions
 - **warrior**: Aggressive refactoring, migrations
 - **support**: Documentation, tests, cleanup
-
-### Example 1 - User explicitly requests spawning:
-User: "Create a debugger to help with bug fixes"
-
-**🔧 Spawning new agent:**
-I'll create a debugger for your team.
-
-\`\`\`spawn
-[{"name": "BugHunter", "class": "debugger"}]
-\`\`\`
-
-### Example 2 - No suitable agent, ask user:
-User: "Fix the login bug"
-You have: builder, scout (no debugger)
-
-**Response:**
-I don't have a debugger on my team currently. I can either:
-1. Delegate this to **BuilderBot** (builder) who can investigate and fix code issues
-2. Spawn a specialized **debugger** agent if you'd like
-
-Would you like me to spawn a debugger, or should I delegate to BuilderBot?
-
-### Example 3 - No suitable agent, delegate to closest:
-User: "Fix this typo in the error message"
-You have: builder, scout (no debugger)
-
-**Response:**
-This is a simple fix. I'll delegate to BuilderBot since it's a straightforward code change.
-
-\`\`\`delegation
-[{"selectedAgentId": "abc123", "selectedAgentName": "BuilderBot", "taskCommand": "Fix the typo in the error message", "reasoning": "Simple code fix within builder capabilities", "confidence": "high"}]
-\`\`\`
 
 ---`;
 }
@@ -1182,6 +1379,22 @@ ${command}`;
 
   return { message, systemPrompt };
 }
+
+/**
+ * Format time since a timestamp (e.g., "5 minutes", "2 hours")
+ */
+function formatTimeSince(timestamp: number): string {
+  const seconds = Math.floor((Date.now() - timestamp) / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ${minutes % 60}m`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ${hours % 24}h`;
+}
+
+
 
 // ============================================================================
 // Service Event Handlers
@@ -1519,6 +1732,52 @@ function setupServiceListeners(): void {
         break;
     }
   });
+
+  // Skill service events
+  skillService.subscribe((event, data) => {
+    switch (event) {
+      case 'created':
+        broadcast({
+          type: 'skill_created',
+          payload: data as Skill,
+        });
+        break;
+      case 'updated':
+        broadcast({
+          type: 'skill_updated',
+          payload: data as Skill,
+        });
+        break;
+      case 'deleted':
+        broadcast({
+          type: 'skill_deleted',
+          payload: { id: data as string },
+        });
+        break;
+    }
+  });
+
+  // Custom agent class service events
+  customClassService.customClassEvents.on('created', (customClass: CustomAgentClass) => {
+    broadcast({
+      type: 'custom_agent_class_created',
+      payload: customClass,
+    });
+  });
+
+  customClassService.customClassEvents.on('updated', (customClass: CustomAgentClass) => {
+    broadcast({
+      type: 'custom_agent_class_updated',
+      payload: customClass,
+    });
+  });
+
+  customClassService.customClassEvents.on('deleted', (id: string) => {
+    broadcast({
+      type: 'custom_agent_class_deleted',
+      payload: { id },
+    });
+  });
 }
 
 // ============================================================================
@@ -1569,6 +1828,26 @@ export function init(server: HttpServer): WebSocketServer {
       JSON.stringify({
         type: 'buildings_update',
         payload: buildings,
+      })
+    );
+
+    // Send current skills
+    const skills = skillService.getAllSkills();
+    log.log(` Sending initial skills_update with ${skills.length} skills`);
+    ws.send(
+      JSON.stringify({
+        type: 'skills_update',
+        payload: skills,
+      })
+    );
+
+    // Send current custom agent classes
+    const customClasses = customClassService.getAllCustomClasses();
+    log.log(` Sending initial custom_agent_classes_update with ${customClasses.length} custom classes`);
+    ws.send(
+      JSON.stringify({
+        type: 'custom_agent_classes_update',
+        payload: customClasses,
       })
     );
 

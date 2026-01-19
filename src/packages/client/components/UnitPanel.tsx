@@ -1022,7 +1022,7 @@ function BossAgentSection({ agent }: BossAgentSectionProps) {
               </div>
             ) : (
               subordinates.map((sub) => {
-                const classConfig = AGENT_CLASSES[sub.class];
+                const classConfig = AGENT_CLASSES[sub.class as keyof typeof AGENT_CLASSES];
                 return (
                   <div
                     key={sub.id}
@@ -1112,7 +1112,7 @@ function DelegationDecisionItem({ decision }: DelegationDecisionItemProps) {
   };
 
   const targetAgent = state.agents.get(decision.selectedAgentId);
-  const targetClassConfig = targetAgent ? AGENT_CLASSES[targetAgent.class] : null;
+  const targetClassConfig = targetAgent ? AGENT_CLASSES[targetAgent.class as keyof typeof AGENT_CLASSES] : null;
 
   const confidenceColors = {
     high: '#4aff9e',

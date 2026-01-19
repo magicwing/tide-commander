@@ -193,6 +193,16 @@ export function deleteAgent(id: string): boolean {
   agents.delete(id);
   persistAgents();
 
+  // Clean up skill assignments for this agent (deferred import to avoid circular dependency)
+  setImmediate(async () => {
+    try {
+      const skillService = await import('./skill-service.js');
+      skillService.removeAgentFromAllSkills(id);
+    } catch (err) {
+      // Skill service might not be loaded yet, ignore
+    }
+  });
+
   emit('deleted', id);
   return true;
 }

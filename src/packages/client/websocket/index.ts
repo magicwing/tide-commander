@@ -484,6 +484,80 @@ function handleServerMessage(message: ServerMessage): void {
       onToast?.('success', 'Agent Deployed', `${agent.name} spawned by boss, walking to position`);
       break;
     }
+
+    // ========================================================================
+    // Skill Messages
+    // ========================================================================
+
+    case 'skills_update': {
+      const skillsArray = message.payload as import('../../shared/types').Skill[];
+      store.setSkillsFromServer(skillsArray);
+      console.log(`[WebSocket] Received ${skillsArray.length} skills`);
+      break;
+    }
+
+    case 'skill_created': {
+      const skill = message.payload as import('../../shared/types').Skill;
+      store.addSkillFromServer(skill);
+      console.log(`[WebSocket] Skill created: ${skill.name}`);
+      break;
+    }
+
+    case 'skill_updated': {
+      const skill = message.payload as import('../../shared/types').Skill;
+      store.updateSkillFromServer(skill);
+      console.log(`[WebSocket] Skill updated: ${skill.name}`);
+      break;
+    }
+
+    case 'skill_deleted': {
+      const { id } = message.payload as { id: string };
+      store.removeSkillFromServer(id);
+      console.log(`[WebSocket] Skill deleted: ${id}`);
+      break;
+    }
+
+    case 'agent_skills': {
+      // Response to request_agent_skills - currently just logged, could be used for validation
+      const { agentId, skills } = message.payload as {
+        agentId: string;
+        skills: import('../../shared/types').Skill[];
+      };
+      console.log(`[WebSocket] Agent ${agentId} has ${skills.length} skills`);
+      break;
+    }
+
+    // ========================================================================
+    // Custom Agent Class Messages
+    // ========================================================================
+
+    case 'custom_agent_classes_update': {
+      const classesArray = message.payload as import('../../shared/types').CustomAgentClass[];
+      store.setCustomAgentClassesFromServer(classesArray);
+      console.log(`[WebSocket] Received ${classesArray.length} custom agent classes`);
+      break;
+    }
+
+    case 'custom_agent_class_created': {
+      const customClass = message.payload as import('../../shared/types').CustomAgentClass;
+      store.addCustomAgentClassFromServer(customClass);
+      console.log(`[WebSocket] Custom agent class created: ${customClass.name}`);
+      break;
+    }
+
+    case 'custom_agent_class_updated': {
+      const customClass = message.payload as import('../../shared/types').CustomAgentClass;
+      store.updateCustomAgentClassFromServer(customClass);
+      console.log(`[WebSocket] Custom agent class updated: ${customClass.name}`);
+      break;
+    }
+
+    case 'custom_agent_class_deleted': {
+      const { id } = message.payload as { id: string };
+      store.removeCustomAgentClassFromServer(id);
+      console.log(`[WebSocket] Custom agent class deleted: ${id}`);
+      break;
+    }
   }
 
   perf.end(`ws:${message.type}`);

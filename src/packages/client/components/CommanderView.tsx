@@ -793,6 +793,7 @@ function AgentPanel({ agent, history, outputs, isExpanded, isFocused, advancedVi
     waiting_permission: '#ffcc00',
     error: '#ff4a4a',
     offline: '#888888',
+    orphaned: '#ff9e4a',
   }[agent.status] || '#888888';
 
   return (

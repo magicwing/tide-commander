@@ -8,4 +8,6 @@ export * as claudeService from './claude-service.js';
 export * as supervisorService from './supervisor-service.js';
 export * as permissionService from './permission-service.js';
 export * as bossService from './boss-service.js';
+export * as skillService from './skill-service.js';
+export * as customClassService from './custom-class-service.js';
 export { buildBossSystemPrompt } from './boss-service.js';

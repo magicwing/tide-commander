@@ -1,0 +1,177 @@
+@use 'sass:color';
+@use '../variables' as *;
+
+// Floating button for skills panel - positioned after shortcuts button
+.skills-toggle-btn {
+  position: fixed;
+  bottom: 238px;  // Stacked above shortcuts button (196 + 36 + 6)
+  left: 16px;     // Aligned with other buttons
+  width: 36px;
+  height: 36px;
+  border-radius: $radius-lg;
+  background: linear-gradient(180deg, $dracula-current 0%, $dracula-bg 100%);
+  border: 1px solid $dracula-comment;
+  color: $dracula-yellow;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 150;
+  transition: all $transition-fast;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+
+  &:hover {
+    border-color: $dracula-yellow;
+    color: $dracula-yellow;
+    background: linear-gradient(180deg, color.adjust($dracula-current, $lightness: 5%) 0%, $dracula-current 100%);
+  }
+}
+
+// Panel overlay (click to close)
+.panel-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.3);
+  z-index: 300;
+}
+
+// Side panel container (slides from left)
+.side-panel {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 400px;
+  height: 100vh;
+  background: $bg-secondary;
+  border-right: 1px solid $border-color;
+  display: flex;
+  flex-direction: column;
+  z-index: 350;
+  box-shadow: 4px 0 20px rgba(0, 0, 0, 0.5);
+  animation: slide-in-left $transition-normal ease-out;
+}
+
+@keyframes slide-in-left {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+// Skills panel specific styles
+.skills-panel {
+  .panel-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px;
+    border-bottom: 1px solid $border-color;
+
+    h3 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .btn {
+      margin-left: auto;
+    }
+
+    .panel-close {
+      background: none;
+      border: none;
+      color: $text-secondary;
+      font-size: 24px;
+      cursor: pointer;
+      padding: 0;
+      line-height: 1;
+      margin-left: 8px;
+      transition: color $transition-fast;
+
+      &:hover {
+        color: $text-primary;
+      }
+    }
+  }
+}
+
+// Skill card styles
+.skill-card {
+  transition: all $transition-fast;
+
+  &:hover {
+    border-color: $accent-blue !important;
+  }
+
+  &.disabled {
+    opacity: 0.6;
+  }
+}
+
+// Skill editor modal enhancements
+.skill-editor-modal {
+  width: 90%;
+  max-width: 700px;
+
+  .modal-body {
+    padding: 20px;
+  }
+
+  .form-section {
+    margin-bottom: 16px;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  .form-label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: $text-secondary;
+    margin-bottom: 6px;
+  }
+
+  .form-hint {
+    font-size: 11px;
+    color: $text-muted;
+    margin-top: 4px;
+  }
+
+  .form-input {
+    width: 100%;
+    padding: 8px 12px;
+    background: $bg-primary;
+    border: 1px solid $border-color;
+    border-radius: $radius-sm;
+    color: $text-primary;
+    font-size: 13px;
+    transition: border-color $transition-fast;
+
+    &:focus {
+      outline: none;
+      border-color: $accent-blue;
+    }
+
+    &::placeholder {
+      color: $text-muted;
+    }
+  }
+
+  textarea.form-input {
+    resize: vertical;
+    min-height: 80px;
+  }
+}
+
+// Tag styles for tools/assignments
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all $transition-fast;
+
+  &:hover {
+    background: rgba($accent-red, 0.2) !important;
+    color: $accent-red;
+  }
+}

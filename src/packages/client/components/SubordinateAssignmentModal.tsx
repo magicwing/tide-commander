@@ -111,7 +111,7 @@ export function SubordinateAssignmentModal({ isOpen, bossId, onClose }: Subordin
             ) : (
               availableAgents.map((agent) => {
                 const isSelected = selectedSubordinates.has(agent.id);
-                const classConfig = AGENT_CLASSES[agent.class];
+                const classConfig = AGENT_CLASSES[agent.class as keyof typeof AGENT_CLASSES];
                 const isCurrentlyAssigned = boss.subordinateIds?.includes(agent.id);
 
                 return (

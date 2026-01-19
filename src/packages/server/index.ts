@@ -5,7 +5,7 @@
 
 import { createServer } from 'http';
 import { createApp } from './app.js';
-import { agentService, claudeService, supervisorService, bossService } from './services/index.js';
+import { agentService, claudeService, supervisorService, bossService, skillService, customClassService } from './services/index.js';
 import * as websocket from './websocket/handler.js';
 import { getDataDir } from './data/index.js';
 import { logger } from './utils/logger.js';
@@ -19,6 +19,8 @@ async function main(): Promise<void> {
   claudeService.init();
   supervisorService.init();
   bossService.init();
+  skillService.initSkills();
+  customClassService.initCustomClasses();
 
   logger.server.log(`Data directory: ${getDataDir()}`);
 

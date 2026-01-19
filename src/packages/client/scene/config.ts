@@ -32,7 +32,7 @@ export const AGENT_CLASS_MODELS: Record<AgentClass, string> = {
   boss: 'character-male-c.glb', // Boss uses architect model (distinguished by crown)
 };
 
-// Character model display info for the selector
+// Character model display info for the selector (maps to built-in agent classes)
 export const CHARACTER_MODELS: { id: AgentClass; model: string; name: string; gender: string }[] = [
   { id: 'scout', model: 'character-male-a.glb', name: 'Explorer', gender: 'Male' },
   { id: 'builder', model: 'character-male-b.glb', name: 'Crafter', gender: 'Male' },
@@ -40,6 +40,22 @@ export const CHARACTER_MODELS: { id: AgentClass; model: string; name: string; ge
   { id: 'debugger', model: 'character-female-a.glb', name: 'Analyst', gender: 'Female' },
   { id: 'warrior', model: 'character-female-b.glb', name: 'Fighter', gender: 'Female' },
   { id: 'support', model: 'character-female-c.glb', name: 'Healer', gender: 'Female' },
+];
+
+// All available character models (Kenney Mini Characters)
+export const ALL_CHARACTER_MODELS: { file: string; name: string; gender: string }[] = [
+  { file: 'character-male-a.glb', name: 'Male A (Explorer)', gender: 'Male' },
+  { file: 'character-male-b.glb', name: 'Male B (Crafter)', gender: 'Male' },
+  { file: 'character-male-c.glb', name: 'Male C (Planner)', gender: 'Male' },
+  { file: 'character-male-d.glb', name: 'Male D', gender: 'Male' },
+  { file: 'character-male-e.glb', name: 'Male E', gender: 'Male' },
+  { file: 'character-male-f.glb', name: 'Male F', gender: 'Male' },
+  { file: 'character-female-a.glb', name: 'Female A (Analyst)', gender: 'Female' },
+  { file: 'character-female-b.glb', name: 'Female B (Fighter)', gender: 'Female' },
+  { file: 'character-female-c.glb', name: 'Female C (Healer)', gender: 'Female' },
+  { file: 'character-female-d.glb', name: 'Female D', gender: 'Female' },
+  { file: 'character-female-e.glb', name: 'Female E', gender: 'Female' },
+  { file: 'character-female-f.glb', name: 'Female F', gender: 'Female' },
 ];
 
 // Movement settings

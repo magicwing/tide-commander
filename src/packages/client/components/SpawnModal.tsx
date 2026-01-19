@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { store, useAgents } from '../store';
+import { store, useAgents, useSkillsArray, useCustomAgentClassesArray } from '../store';
 import { AGENT_CLASS_CONFIG, LOTR_NAMES, CHARACTER_MODELS } from '../scene/config';
-import type { AgentClass, PermissionMode } from '../../shared/types';
-import { PERMISSION_MODES } from '../../shared/types';
+import type { AgentClass, PermissionMode, Skill, CustomAgentClass, BuiltInAgentClass } from '../../shared/types';
+import { PERMISSION_MODES, BUILT_IN_AGENT_CLASSES } from '../../shared/types';
 import { intToHex } from '../utils/formatting';
 import { ModelPreview } from './ModelPreview';
 
@@ -36,6 +36,8 @@ function getRandomLotrName(usedNames: Set<string>): string {
 
 export function SpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: SpawnModalProps) {
   const agents = useAgents();
+  const skills = useSkillsArray();
+  const customClasses = useCustomAgentClassesArray();
   const [name, setName] = useState('');
   const [cwd, setCwd] = useState(() => localStorage.getItem('tide-last-cwd') || '');
   const [selectedClass, setSelectedClass] = useState<AgentClass>('scout');
@@ -48,7 +50,51 @@ export function SpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: SpawnM
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [useChrome, setUseChrome] = useState(true); // Enabled by default
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypass'); // Default to permissionless
+  const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(new Set());
   const nameInputRef = useRef<HTMLInputElement>(null);
+
+  // Get available skills (enabled ones)
+  const availableSkills = useMemo(() => skills.filter(s => s.enabled), [skills]);
+
+  // Toggle skill selection
+  const toggleSkill = useCallback((skillId: string) => {
+    setSelectedSkillIds(prev => {
+      const next = new Set(prev);
+      if (next.has(skillId)) {
+        next.delete(skillId);
+      } else {
+        next.add(skillId);
+      }
+      return next;
+    });
+  }, []);
+
+  // Get skills that match the selected class (for auto-selection hint)
+  const classMatchingSkills = useMemo(() => {
+    return availableSkills.filter(s => s.assignedAgentClasses.includes(selectedClass));
+  }, [availableSkills, selectedClass]);
+
+  // Get custom class config if selected class is custom
+  const selectedCustomClass = useMemo(() => {
+    return customClasses.find(c => c.id === selectedClass);
+  }, [customClasses, selectedClass]);
+
+  // Get the visual model file for preview
+  // For custom classes, use the model file directly; for built-in, use agentClass to lookup
+  const previewModelFile = useMemo((): string | undefined => {
+    if (selectedCustomClass?.model) {
+      return selectedCustomClass.model;
+    }
+    return undefined; // Let ModelPreview look up from agentClass
+  }, [selectedCustomClass]);
+
+  // Agent class for ModelPreview (only used when no custom model file)
+  const previewAgentClass = useMemo((): BuiltInAgentClass => {
+    if (selectedCustomClass) {
+      return 'scout'; // Fallback, but modelFile will take precedence
+    }
+    return selectedClass as BuiltInAgentClass;
+  }, [selectedClass, selectedCustomClass]);
 
   // Fetch Claude sessions
   const fetchSessions = useCallback(async (directory?: string) => {
@@ -134,16 +180,18 @@ export function SpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: SpawnM
     setIsSpawning(true);
     onSpawnStart();
 
+    const initialSkillIds = Array.from(selectedSkillIds);
     console.log('[SpawnModal] Calling store.spawnAgent with:', {
       name: name.trim(),
       class: selectedClass,
       cwd: effectiveCwd.trim(),
       sessionId: selectedSessionId || undefined,
       useChrome,
-      permissionMode
+      permissionMode,
+      initialSkillIds
     });
 
-    store.spawnAgent(name.trim(), selectedClass, effectiveCwd.trim(), undefined, selectedSessionId || undefined, useChrome, permissionMode);
+    store.spawnAgent(name.trim(), selectedClass, effectiveCwd.trim(), undefined, selectedSessionId || undefined, useChrome, permissionMode, initialSkillIds);
   };
 
   const handleSuccess = () => {
@@ -250,9 +298,11 @@ export function SpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: SpawnM
         <div className="modal-body spawn-modal-body">
           {/* Left: Model Preview */}
           <div className="spawn-preview-section">
-            <ModelPreview agentClass={selectedClass} width={180} height={220} />
+            <ModelPreview agentClass={previewAgentClass} modelFile={previewModelFile} width={180} height={220} />
             <div className="spawn-preview-name">
-              {CHARACTER_MODELS.find((c) => c.id === selectedClass)?.name || selectedClass}
+              {selectedCustomClass
+                ? `${selectedCustomClass.icon} ${selectedCustomClass.name}`
+                : CHARACTER_MODELS.find((c) => c.id === selectedClass)?.name || selectedClass}
             </div>
           </div>
 
@@ -331,8 +381,9 @@ export function SpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: SpawnM
             </div>
 
             <div className="form-group">
-              <label className="form-label">Character Model</label>
+              <label className="form-label">Agent Class</label>
               <div className="class-selector compact">
+                {/* Built-in classes */}
                 {CHARACTER_MODELS.map((char) => {
                   const config = AGENT_CLASS_CONFIG[char.id];
                   return (
@@ -351,8 +402,57 @@ export function SpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: SpawnM
                     </div>
                   );
                 })}
+                {/* Custom classes */}
+                {customClasses.map((customClass) => (
+                  <div
+                    key={customClass.id}
+                    className={`class-option ${selectedClass === customClass.id ? 'selected' : ''}`}
+                    onClick={() => setSelectedClass(customClass.id)}
+                  >
+                    <div
+                      className="class-icon"
+                      style={{ background: `${customClass.color}20` }}
+                    >
+                      {customClass.icon}
+                    </div>
+                    <div className="class-name">{customClass.name}</div>
+                  </div>
+                ))}
               </div>
             </div>
+
+            {/* Skills Selection */}
+            {availableSkills.length > 0 && (
+              <div className="form-group">
+                <label className="form-label">
+                  Initial Skills
+                  <span className="form-label-hint">(optional)</span>
+                </label>
+                <div className="skills-selector">
+                  {availableSkills.map((skill) => {
+                    const isSelected = selectedSkillIds.has(skill.id);
+                    const isClassMatch = skill.assignedAgentClasses.includes(selectedClass);
+                    return (
+                      <div
+                        key={skill.id}
+                        className={`skill-option ${isSelected ? 'selected' : ''} ${isClassMatch ? 'class-match' : ''}`}
+                        onClick={() => toggleSkill(skill.id)}
+                        title={skill.description}
+                      >
+                        <span className="skill-check">{isSelected ? '✓' : ''}</span>
+                        <span className="skill-name">{skill.name}</span>
+                        {isClassMatch && <span className="skill-class-badge">auto</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+                {classMatchingSkills.length > 0 && (
+                  <div className="form-hint">
+                    Skills marked "auto" will apply to this class automatically
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="form-group">
               <label className="toggle-switch">

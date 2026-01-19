@@ -13,7 +13,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import type { Agent, DrawingArea, AgentSupervisorHistory, AgentSupervisorHistoryEntry, Building, DelegationDecision } from '../../shared/types.js';
+import type { Agent, DrawingArea, AgentSupervisorHistory, AgentSupervisorHistoryEntry, Building, DelegationDecision, Skill, StoredSkill, CustomAgentClass } from '../../shared/types.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('Data');
@@ -29,6 +29,8 @@ const AREAS_FILE = path.join(DATA_DIR, 'areas.json');
 const BUILDINGS_FILE = path.join(DATA_DIR, 'buildings.json');
 const SUPERVISOR_HISTORY_FILE = path.join(DATA_DIR, 'supervisor-history.json');
 const DELEGATION_HISTORY_FILE = path.join(DATA_DIR, 'delegation-history.json');
+const SKILLS_FILE = path.join(DATA_DIR, 'skills.json');
+const CUSTOM_CLASSES_FILE = path.join(DATA_DIR, 'custom-agent-classes.json');
 
 // Maximum history entries per agent
 const MAX_HISTORY_PER_AGENT = 50;
@@ -428,4 +430,102 @@ export function deleteDelegationHistory(
   bossId: string
 ): void {
   histories.delete(bossId);
+}
+
+// ============================================================================
+// Skills Persistence
+// ============================================================================
+
+interface SkillsData {
+  skills: StoredSkill[];
+  savedAt: number;
+  version: string;
+}
+
+/**
+ * Load skills from disk
+ */
+export function loadSkills(): Skill[] {
+  ensureDataDir();
+
+  try {
+    if (fs.existsSync(SKILLS_FILE)) {
+      const data: SkillsData = JSON.parse(fs.readFileSync(SKILLS_FILE, 'utf-8'));
+      log.log(` Loaded ${data.skills.length} skills from ${SKILLS_FILE}`);
+      return data.skills;
+    }
+  } catch (err) {
+    log.error(' Failed to load skills:', err);
+  }
+
+  return [];
+}
+
+/**
+ * Save skills to disk
+ */
+export function saveSkills(skills: Skill[]): void {
+  ensureDataDir();
+
+  try {
+    const data: SkillsData = {
+      skills: skills as StoredSkill[],
+      savedAt: Date.now(),
+      version: '1.0.0',
+    };
+
+    fs.writeFileSync(SKILLS_FILE, JSON.stringify(data, null, 2));
+    log.log(` Saved ${skills.length} skills to ${SKILLS_FILE}`);
+  } catch (err) {
+    log.error(' Failed to save skills:', err);
+  }
+}
+
+// ============================================================================
+// Custom Agent Classes Persistence
+// ============================================================================
+
+interface CustomAgentClassesData {
+  classes: CustomAgentClass[];
+  savedAt: number;
+  version: string;
+}
+
+/**
+ * Load custom agent classes from disk
+ */
+export function loadCustomAgentClasses(): CustomAgentClass[] {
+  ensureDataDir();
+
+  try {
+    if (fs.existsSync(CUSTOM_CLASSES_FILE)) {
+      const data: CustomAgentClassesData = JSON.parse(fs.readFileSync(CUSTOM_CLASSES_FILE, 'utf-8'));
+      log.log(` Loaded ${data.classes.length} custom agent classes from ${CUSTOM_CLASSES_FILE}`);
+      return data.classes;
+    }
+  } catch (err) {
+    log.error(' Failed to load custom agent classes:', err);
+  }
+
+  return [];
+}
+
+/**
+ * Save custom agent classes to disk
+ */
+export function saveCustomAgentClasses(classes: CustomAgentClass[]): void {
+  ensureDataDir();
+
+  try {
+    const data: CustomAgentClassesData = {
+      classes,
+      savedAt: Date.now(),
+      version: '1.0.0',
+    };
+
+    fs.writeFileSync(CUSTOM_CLASSES_FILE, JSON.stringify(data, null, 2));
+    log.log(` Saved ${classes.length} custom agent classes to ${CUSTOM_CLASSES_FILE}`);
+  } catch (err) {
+    log.error(' Failed to save custom agent classes:', err);
+  }
 }

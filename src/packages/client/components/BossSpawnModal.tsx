@@ -192,7 +192,7 @@ export function BossSpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: Bo
                 ) : (
                   availableSubordinates.map((agent) => {
                     const isSelected = selectedSubordinates.has(agent.id);
-                    const classConfig = AGENT_CLASSES[agent.class];
+                    const classConfig = AGENT_CLASSES[agent.class as keyof typeof AGENT_CLASSES];
                     return (
                       <div
                         key={agent.id}
