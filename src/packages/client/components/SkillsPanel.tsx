@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { store, useSkillsArray, useAgents, useCustomAgentClassesArray } from '../store';
 import { SkillEditorModal } from './SkillEditorModal';
+import { ModelPreview } from './ModelPreview';
 import type { Skill, CustomAgentClass } from '../../shared/types';
 import { ALL_CHARACTER_MODELS } from '../scene/config';
 
@@ -29,6 +30,25 @@ export function SkillsPanel({ isOpen, onClose }: SkillsPanelProps) {
   const [classDescription, setClassDescription] = useState('');
   const [classModel, setClassModel] = useState('character-male-a.glb');
   const [classDefaultSkillIds, setClassDefaultSkillIds] = useState<string[]>([]);
+
+  // Get current model index for navigation
+  const currentModelIndex = useMemo(() => {
+    const idx = ALL_CHARACTER_MODELS.findIndex(m => m.file === classModel);
+    return idx >= 0 ? idx : 0;
+  }, [classModel]);
+
+  // Get current model info
+  const currentModelInfo = useMemo(() => {
+    return ALL_CHARACTER_MODELS[currentModelIndex] || ALL_CHARACTER_MODELS[0];
+  }, [currentModelIndex]);
+
+  // Navigate to previous/next model
+  const navigateModel = useCallback((direction: 'prev' | 'next') => {
+    const newIndex = direction === 'prev'
+      ? (currentModelIndex - 1 + ALL_CHARACTER_MODELS.length) % ALL_CHARACTER_MODELS.length
+      : (currentModelIndex + 1) % ALL_CHARACTER_MODELS.length;
+    setClassModel(ALL_CHARACTER_MODELS[newIndex].file);
+  }, [currentModelIndex]);
 
   // Filter skills by search
   const filteredSkills = skills.filter(skill => {
@@ -461,6 +481,78 @@ export function SkillsPanel({ isOpen, onClose }: SkillsPanelProps) {
                 />
               </div>
 
+              {/* Model selector with 3D preview */}
+              <div className="form-section" style={{ marginBottom: '16px' }}>
+                <label className="form-label">Character Model</label>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '12px',
+                  padding: '12px',
+                  background: 'var(--bg-tertiary)',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-color)'
+                }}>
+                  <button
+                    type="button"
+                    onClick={() => navigateModel('prev')}
+                    style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '50%',
+                      border: '1px solid var(--border-color)',
+                      background: 'var(--bg-secondary)',
+                      color: 'var(--text-primary)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '18px',
+                    }}
+                  >
+                    ‹
+                  </button>
+                  <div style={{ textAlign: 'center' }}>
+                    <ModelPreview modelFile={classModel} width={120} height={150} />
+                    <div style={{
+                      marginTop: '8px',
+                      fontSize: '12px',
+                      fontWeight: 500,
+                      color: 'var(--text-primary)'
+                    }}>
+                      {currentModelInfo.name}
+                    </div>
+                    <div style={{
+                      fontSize: '10px',
+                      color: 'var(--text-secondary)',
+                      marginTop: '2px'
+                    }}>
+                      {currentModelIndex + 1} / {ALL_CHARACTER_MODELS.length}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => navigateModel('next')}
+                    style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '50%',
+                      border: '1px solid var(--border-color)',
+                      background: 'var(--bg-secondary)',
+                      color: 'var(--text-primary)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '18px',
+                    }}
+                  >
+                    ›
+                  </button>
+                </div>
+              </div>
+
               <div style={{ display: 'flex', gap: '12px', marginBottom: '12px' }}>
                 <div className="form-section" style={{ flex: '0 0 80px' }}>
                   <label className="form-label">Icon</label>
@@ -473,7 +565,7 @@ export function SkillsPanel({ isOpen, onClose }: SkillsPanelProps) {
                     style={{ textAlign: 'center', fontSize: '18px' }}
                   />
                 </div>
-                <div className="form-section" style={{ flex: '0 0 100px' }}>
+                <div className="form-section" style={{ flex: 1 }}>
                   <label className="form-label">Color</label>
                   <input
                     type="color"
@@ -481,21 +573,6 @@ export function SkillsPanel({ isOpen, onClose }: SkillsPanelProps) {
                     onChange={(e) => setClassColor(e.target.value)}
                     style={{ width: '100%', height: '36px', padding: '2px', cursor: 'pointer' }}
                   />
-                </div>
-                <div className="form-section" style={{ flex: 1 }}>
-                  <label className="form-label">Model</label>
-                  <select
-                    className="form-input"
-                    value={classModel}
-                    onChange={(e) => setClassModel(e.target.value)}
-                    style={{ width: '100%' }}
-                  >
-                    {ALL_CHARACTER_MODELS.map((model) => (
-                      <option key={model.file} value={model.file}>
-                        {model.name}
-                      </option>
-                    ))}
-                  </select>
                 </div>
               </div>
 
