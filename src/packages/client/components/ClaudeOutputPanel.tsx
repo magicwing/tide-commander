@@ -505,7 +505,7 @@ export function ClaudeOutputPanel() {
   // Upload file to server
   const uploadFile = async (file: File | Blob, filename?: string): Promise<AttachedFile | null> => {
     try {
-      const response = await fetch('http://localhost:5174/api/files/upload', {
+      const response = await fetch('/api/files/upload', {
         method: 'POST',
         headers: {
           'Content-Type': file.type || 'application/octet-stream',
@@ -795,7 +795,7 @@ export function ClaudeOutputPanel() {
     }
 
     setLoadingHistory(true);
-    fetch(`http://localhost:5174/api/agents/${selectedAgentId}/history?limit=${MESSAGES_PER_PAGE}&offset=0`)
+    fetch(`/api/agents/${selectedAgentId}/history?limit=${MESSAGES_PER_PAGE}&offset=0`)
       .then(res => res.json())
       .then(data => {
         const messages = data.messages || [];
@@ -846,7 +846,7 @@ export function ClaudeOutputPanel() {
 
     try {
       const res = await fetch(
-        `http://localhost:5174/api/agents/${selectedAgentId}/history?limit=${MESSAGES_PER_PAGE}&offset=${currentOffset}`
+        `/api/agents/${selectedAgentId}/history?limit=${MESSAGES_PER_PAGE}&offset=${currentOffset}`
       );
       const data = await res.json();
 
@@ -899,7 +899,7 @@ export function ClaudeOutputPanel() {
     setSearchLoading(true);
     try {
       const res = await fetch(
-        `http://localhost:5174/api/agents/${selectedAgentId}/search?q=${encodeURIComponent(searchQuery)}&limit=100`
+        `/api/agents/${selectedAgentId}/search?q=${encodeURIComponent(searchQuery)}&limit=100`
       );
       const data = await res.json();
       setSearchResults(data.matches || []);
@@ -1283,7 +1283,7 @@ export function ClaudeOutputPanel() {
                 className={`guake-attachment ${file.isImage ? 'is-image clickable' : ''}`}
                 onClick={() => {
                   if (file.isImage) {
-                    setImageModal({ url: `http://localhost:5174${file.path}`, name: file.name });
+                    setImageModal({ url: file.path, name: file.name });
                   }
                 }}
               >
@@ -1533,13 +1533,13 @@ function renderContentWithImages(
     if (imagePath.startsWith('http')) {
       imageUrl = imagePath;
     } else if (imagePath.startsWith('/uploads/')) {
-      imageUrl = `http://localhost:5174${imagePath}`;
+      imageUrl = imagePath;
     } else if (imagePath.includes('tide-commander-uploads')) {
       // Legacy absolute path - extract filename and use /uploads/
-      imageUrl = `http://localhost:5174/uploads/${imageName}`;
+      imageUrl = `/uploads/${imageName}`;
     } else {
       // Default: assume it's a relative path
-      imageUrl = `http://localhost:5174${imagePath}`;
+      imageUrl = imagePath;
     }
 
     parts.push(

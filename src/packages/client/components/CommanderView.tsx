@@ -171,7 +171,7 @@ export function CommanderView({ isOpen, onClose }: CommanderViewProps) {
 
       try {
         console.log(`[CommanderView] Fetching history for agent ${agent.id} (${agent.name}), sessionId: ${agent.sessionId}`);
-        const res = await fetch(`http://localhost:5174/api/agents/${agent.id}/history?limit=${MESSAGES_PER_PAGE}&offset=0`);
+        const res = await fetch(`/api/agents/${agent.id}/history?limit=${MESSAGES_PER_PAGE}&offset=0`);
         const data = await res.json();
         console.log(`[CommanderView] Got ${data.messages?.length || 0} messages for agent ${agent.id}:`, data.sessionId);
         setHistories(prev => {
@@ -216,7 +216,7 @@ export function CommanderView({ isOpen, onClose }: CommanderViewProps) {
 
     try {
       const res = await fetch(
-        `http://localhost:5174/api/agents/${agentId}/history?limit=${MESSAGES_PER_PAGE}&offset=${currentOffset}`
+        `/api/agents/${agentId}/history?limit=${MESSAGES_PER_PAGE}&offset=${currentOffset}`
       );
       const data = await res.json();
 
@@ -629,7 +629,7 @@ function AgentPanel({ agent, history, outputs, isExpanded, isFocused, advancedVi
   // Upload file to server
   const uploadFile = async (file: File | Blob, filename?: string): Promise<AttachedFile | null> => {
     try {
-      const response = await fetch('http://localhost:5174/api/files/upload', {
+      const response = await fetch('/api/files/upload', {
         method: 'POST',
         headers: {
           'Content-Type': file.type || 'application/octet-stream',

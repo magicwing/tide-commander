@@ -66,7 +66,7 @@ export function connect(): void {
   isConnecting = true;
 
   // Try different URLs based on environment
-  const wsUrl = `ws://${window.location.hostname}:5174/ws`;
+  const wsUrl = `ws://${window.location.host}/ws`;
   const altUrl = `ws://localhost:5174/ws`;
   const url127 = `ws://127.0.0.1:5174/ws`;
 

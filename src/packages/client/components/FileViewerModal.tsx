@@ -75,7 +75,7 @@ export function FileViewerModal({ isOpen, onClose, filePath, action }: FileViewe
     setError(null);
 
     try {
-      const res = await fetch(`http://localhost:5174/api/files/read?path=${encodeURIComponent(filePath)}`);
+      const res = await fetch(`/api/files/read?path=${encodeURIComponent(filePath)}`);
       const data = await res.json();
 
       if (!res.ok) {

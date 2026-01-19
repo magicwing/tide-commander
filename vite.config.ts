@@ -2,6 +2,10 @@ import { defineConfig } from 'vite';
 import { resolve } from 'path';
 import react from '@vitejs/plugin-react';
 
+// Port configuration - can be overridden via environment variables
+const SERVER_PORT = process.env.PORT || 5174;
+const VITE_PORT = process.env.VITE_PORT || 5173;
+
 export default defineConfig({
   plugins: [react()],
   root: '.',
@@ -14,14 +18,14 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    port: Number(VITE_PORT),
     proxy: {
       '/api': {
-        target: 'http://localhost:5174',
+        target: `http://localhost:${SERVER_PORT}`,
         changeOrigin: true,
       },
       '/ws': {
-        target: 'ws://localhost:5174',
+        target: `ws://localhost:${SERVER_PORT}`,
         ws: true,
       },
     },

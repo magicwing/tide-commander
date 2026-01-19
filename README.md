@@ -31,7 +31,7 @@ bun install
 bun run dev
 ```
 
-Open http://localhost:5173 in your browser and you're ready to go! 🎉
+Open http://localhost:5173 in your browser (or your configured `VITE_PORT`) and you're ready to go! 🎉
 
 ## 🎮 How to Use
 
@@ -114,13 +114,23 @@ Tide Commander provides a visual interface for managing multiple Claude Code CLI
 - Directory names encode the working directory path (e.g., `/home/user/project` → `-home-user-project`)
 - Tide Commander reads these to resume sessions and display conversation history
 
+## ⚙️ Configuration
+
+Ports can be configured via environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | 5174 | Backend server port |
+| `VITE_PORT` | 5173 | Vite dev server port |
+| `TIDE_SERVER` | `http://localhost:$PORT` | Server URL for hooks |
+
 ## 🛠️ Development
 
 ```bash
-# Run client only (Vite dev server on :5173)
+# Run client only
 bun run dev:client
 
-# Run server only (Express + WebSocket on :5174)
+# Run server only
 bun run dev:server
 
 # Run both concurrently
@@ -142,7 +152,7 @@ bun run build
 - Run `which claude` to verify installation
 
 **WebSocket disconnects**
-- Check that the server is running on port 5174
+- Check that the server is running (default port 5174, or your configured `PORT`)
 - Look for CORS or firewall issues
 
 ## 📄 License

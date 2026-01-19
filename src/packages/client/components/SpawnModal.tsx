@@ -55,8 +55,8 @@ export function SpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: SpawnM
     setLoadingSessions(true);
     try {
       const url = directory
-        ? `http://localhost:5174/api/agents/claude-sessions?cwd=${encodeURIComponent(directory)}`
-        : 'http://localhost:5174/api/agents/claude-sessions';
+        ? `/api/agents/claude-sessions?cwd=${encodeURIComponent(directory)}`
+        : '/api/agents/claude-sessions';
       const res = await fetch(url);
       const data = await res.json();
       setSessions(data.sessions || []);

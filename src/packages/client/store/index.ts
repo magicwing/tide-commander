@@ -586,7 +586,7 @@ class Store {
   // Load tool history from server (for page refresh)
   async loadToolHistory(): Promise<void> {
     try {
-      const res = await fetch('http://localhost:5174/api/agents/tool-history?limit=100');
+      const res = await fetch('/api/agents/tool-history?limit=100');
       const data = await res.json();
 
       if (data.toolExecutions) {
@@ -1178,7 +1178,7 @@ class Store {
 
   private async pollAgentStatus(): Promise<void> {
     try {
-      const res = await fetch('http://localhost:5174/api/agents/status');
+      const res = await fetch('/api/agents/status');
       if (!res.ok) return;
 
       const statuses = await res.json() as Array<{

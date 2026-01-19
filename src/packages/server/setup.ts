@@ -113,4 +113,4 @@ console.log('\n' + '='.repeat(40));
 console.log('🎉 Setup complete!\n');
 console.log('To start Tide Commander:');
 console.log('  npm run dev\n');
-console.log('Then open http://localhost:5173 in your browser');
+console.log('Then open http://localhost:5173 in your browser (or your configured VITE_PORT)');

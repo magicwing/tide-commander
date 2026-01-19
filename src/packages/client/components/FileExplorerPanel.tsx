@@ -514,7 +514,7 @@ export function FileExplorerPanel({ isOpen, areaId, onClose, onChangeArea }: Fil
     setTreeLoading(true);
 
     try {
-      const res = await fetch(`http://localhost:5174/api/files/tree?path=${encodeURIComponent(currentFolder)}&depth=10`);
+      const res = await fetch(`/api/files/tree?path=${encodeURIComponent(currentFolder)}&depth=10`);
       const data = await res.json();
       if (res.ok && data.tree) {
         // Wrap in a root node for the directory
@@ -547,7 +547,7 @@ export function FileExplorerPanel({ isOpen, areaId, onClose, onChangeArea }: Fil
     const dir = currentFolder;
 
     try {
-      const res = await fetch(`http://localhost:5174/api/files/git-status?path=${encodeURIComponent(dir)}`);
+      const res = await fetch(`/api/files/git-status?path=${encodeURIComponent(dir)}`);
       const data = await res.json();
 
       if (res.ok) {
@@ -570,7 +570,7 @@ export function FileExplorerPanel({ isOpen, areaId, onClose, onChangeArea }: Fil
     setSelectedPath(filePath);
 
     try {
-      const res = await fetch(`http://localhost:5174/api/files/read?path=${encodeURIComponent(filePath)}`);
+      const res = await fetch(`/api/files/read?path=${encodeURIComponent(filePath)}`);
       const data = await res.json();
 
       if (!res.ok) {
@@ -756,7 +756,7 @@ export function FileExplorerPanel({ isOpen, areaId, onClose, onChangeArea }: Fil
     // For modified files, also load the original from git
     if (status === 'modified') {
       try {
-        const res = await fetch(`http://localhost:5174/api/files/git-original?path=${encodeURIComponent(path)}`);
+        const res = await fetch(`/api/files/git-original?path=${encodeURIComponent(path)}`);
         const data = await res.json();
         if (res.ok && !data.isNew) {
           setOriginalContent(data.content);
