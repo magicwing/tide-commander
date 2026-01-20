@@ -238,7 +238,7 @@ export class CharacterFactory {
 
     const ring = new THREE.Mesh(geometry, material);
     ring.rotation.x = -Math.PI / 2;
-    ring.position.y = 0.02;
+    ring.position.y = 0.05;
     ring.name = 'selectionRing';
 
     return ring;
