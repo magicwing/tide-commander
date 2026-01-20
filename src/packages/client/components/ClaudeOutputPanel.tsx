@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo, memo } from '
 import ReactMarkdown, { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useStore, useHideCost, useAgentOutputs, store, ClaudeOutput, useCustomAgentClassesArray, useContextModalAgentId, useFileViewerPath, useFileViewerEditData } from '../store';
-import type { Agent, AgentAnalysis, PermissionRequest, CustomAgentClass } from '../../shared/types';
+import type { Agent, AgentAnalysis, PermissionRequest, CustomAgentClass, BuiltInAgentClass } from '../../shared/types';
 import { BOSS_CONTEXT_START, BOSS_CONTEXT_END } from '../../shared/types';
 import { AGENT_CLASS_CONFIG } from '../scene/config';
 import { formatIdleTime, getIdleTimerColor, filterCostText, intToHex } from '../utils/formatting';
@@ -11,7 +11,7 @@ import { FileViewerModal } from './FileViewerModal';
 
 // Helper to get class config (built-in or custom)
 function getClassConfig(agentClass: string, customClasses: CustomAgentClass[]): { icon: string; color: string } {
-  const builtIn = AGENT_CLASS_CONFIG[agentClass];
+  const builtIn = AGENT_CLASS_CONFIG[agentClass as BuiltInAgentClass];
   if (builtIn) {
     const color = typeof builtIn.color === 'number' ? intToHex(builtIn.color) : builtIn.color;
     return { icon: builtIn.icon, color };
@@ -73,6 +73,7 @@ const MIN_TERMINAL_HEIGHT = 20; // percentage
 const MAX_TERMINAL_HEIGHT = 85; // percentage
 const TERMINAL_HEIGHT_KEY = 'guake-terminal-height';
 const INPUT_TEXT_KEY_PREFIX = 'guake-input-'; // Per-agent input text persistence
+const PASTED_TEXTS_KEY_PREFIX = 'guake-pasted-'; // Per-agent pasted text storage
 
 interface HistoryMessage {
   type: 'user' | 'assistant' | 'tool_use' | 'tool_result';
@@ -369,15 +370,34 @@ interface DelegatedTaskHeaderProps {
 }
 
 function DelegatedTaskHeader({ bossName, taskCommand }: DelegatedTaskHeaderProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  // Truncate long task commands for compact view
+  const truncatedCommand = taskCommand.length > 60
+    ? taskCommand.slice(0, 60) + '...'
+    : taskCommand;
+
   return (
-    <div className="delegated-task-header">
-      <div className="delegated-task-badge">
+    <div className={`delegated-task-header ${isExpanded ? 'expanded' : 'compact'}`}>
+      <div className="delegated-task-badge" onClick={() => setIsExpanded(!isExpanded)}>
         <span className="delegated-task-icon">👑</span>
-        <span className="delegated-task-label">Delegated from <strong>{bossName}</strong></span>
+        <span className="delegated-task-label">
+          via <strong>{bossName}</strong>
+        </span>
+        <span className="delegated-task-toggle">
+          {isExpanded ? '▼' : '▶'}
+        </span>
       </div>
-      <div className="delegated-task-command">
-        {taskCommand}
-      </div>
+      {isExpanded && (
+        <div className="delegated-task-command">
+          {taskCommand}
+        </div>
+      )}
+      {!isExpanded && (
+        <div className="delegated-task-preview">
+          {truncatedCommand}
+        </div>
+      )}
     </div>
   );
 }
@@ -485,6 +505,13 @@ export function ClaudeOutputPanel() {
       const currentValue = prev.get(selectedAgentId) || new Map();
       const newValue = typeof value === 'function' ? value(currentValue) : value;
       newMap.set(selectedAgentId, newValue);
+      // Persist pasted texts to localStorage so they survive component re-mounts
+      if (newValue.size > 0) {
+        const serialized = JSON.stringify(Array.from(newValue.entries()));
+        localStorage.setItem(`${PASTED_TEXTS_KEY_PREFIX}${selectedAgentId}`, serialized);
+      } else {
+        localStorage.removeItem(`${PASTED_TEXTS_KEY_PREFIX}${selectedAgentId}`);
+      }
       return newMap;
     });
   };
@@ -796,7 +823,7 @@ export function ClaudeOutputPanel() {
     };
   }, []); // No dependencies - listeners are registered once
 
-  // Load saved input text from localStorage when switching agents
+  // Load saved input text and pasted texts from localStorage when switching agents
   useEffect(() => {
     if (!selectedAgentId) return;
     // Only load from localStorage if we don't have a value in state yet
@@ -804,6 +831,20 @@ export function ClaudeOutputPanel() {
       const saved = localStorage.getItem(`${INPUT_TEXT_KEY_PREFIX}${selectedAgentId}`);
       if (saved) {
         setAgentCommands(prev => new Map(prev).set(selectedAgentId, saved));
+      }
+    }
+    // Also load pasted texts from localStorage
+    if (!agentPastedTexts.has(selectedAgentId)) {
+      const savedPasted = localStorage.getItem(`${PASTED_TEXTS_KEY_PREFIX}${selectedAgentId}`);
+      if (savedPasted) {
+        try {
+          const entries = JSON.parse(savedPasted) as [number, string][];
+          const map = new Map(entries);
+          setAgentPastedTexts(prev => new Map(prev).set(selectedAgentId, map));
+        } catch {
+          // Invalid JSON, remove it
+          localStorage.removeItem(`${PASTED_TEXTS_KEY_PREFIX}${selectedAgentId}`);
+        }
       }
     }
   }, [selectedAgentId]);
@@ -898,14 +939,25 @@ export function ClaudeOutputPanel() {
 
         // Clear live outputs when history is loaded to avoid duplicates
         // History contains the definitive record from the transcript file
-        // BUT: preserve delegation messages since they're not persisted to the session file
-        if (messages.length > 0) {
+        // BUT: preserve delegation messages and any recent outputs (streaming or from current session)
+        // since they're not yet persisted to the session file
+        // SKIP clearing if agent is actively working - don't disrupt streaming output
+        const currentAgent = state.agents.get(selectedAgentId);
+        const isAgentWorking = currentAgent?.status === 'working';
+        if (messages.length > 0 && !isAgentWorking) {
           const currentOutputs = store.getOutputs(selectedAgentId);
-          const delegationMessages = currentOutputs.filter(o => o.isDelegation);
+          // Preserve delegation messages AND any outputs from the last 30 seconds (likely current session)
+          // This prevents losing streaming output when history loads
+          const thirtySecondsAgo = Date.now() - 30000;
+          const preservedOutputs = currentOutputs.filter(o =>
+            o.isDelegation ||
+            o.isStreaming ||
+            (o.timestamp && o.timestamp > thirtySecondsAgo)
+          );
           store.clearOutputs(selectedAgentId);
-          // Re-add delegation messages so they're preserved
-          for (const delegation of delegationMessages) {
-            store.addOutput(selectedAgentId, delegation);
+          // Re-add preserved outputs
+          for (const output of preservedOutputs) {
+            store.addOutput(selectedAgentId, output);
           }
         }
 

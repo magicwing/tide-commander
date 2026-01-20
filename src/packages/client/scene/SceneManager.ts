@@ -213,13 +213,22 @@ export class SceneManager {
     if (!this.characterLoader.isLoaded) return;
 
     const state = store.getState();
+    const customClasses = state.customAgentClasses;
+
     for (const [agentId, meshData] of this.agentMeshes) {
       const agent = state.agents.get(agentId);
       if (!agent) continue;
 
-      // Check if using fallback capsule
       const body = meshData.group.getObjectByName('characterBody');
-      if (body instanceof THREE.Mesh && body.geometry instanceof THREE.CapsuleGeometry) {
+
+      // Check if agent needs upgrade:
+      // 1. Using fallback capsule (CapsuleGeometry)
+      // 2. Has a custom class and the model might have changed
+      const isCapsule = body instanceof THREE.Mesh && body.geometry instanceof THREE.CapsuleGeometry;
+      const hasCustomClass = customClasses.has(agent.class);
+      const needsUpgrade = isCapsule || hasCustomClass;
+
+      if (needsUpgrade) {
         // Preserve current mesh position (might be mid-animation)
         const currentPosition = meshData.group.position.clone();
 
@@ -232,7 +241,7 @@ export class SceneManager {
         // Apply current character scale (with boss multiplier if applicable)
         const newBody = newMeshData.group.getObjectByName('characterBody');
         if (newBody) {
-          const bossMultiplier = agent.class === 'boss' ? 1.5 : 1.0;
+          const bossMultiplier = (agent.isBoss || agent.class === 'boss') ? 1.5 : 1.0;
           newBody.scale.setScalar(this.characterScale * bossMultiplier);
         }
 
@@ -244,7 +253,7 @@ export class SceneManager {
         // Start status-based animation (sit if idle)
         this.updateStatusAnimation(agent, newMeshData);
 
-        console.log(`[SceneManager] Upgraded ${agent.name} to character model`);
+        console.log(`[SceneManager] Upgraded ${agent.name} to character model (isCapsule=${isCapsule}, hasCustomClass=${hasCustomClass})`);
       }
     }
 
@@ -271,7 +280,7 @@ export class SceneManager {
     // Apply current character scale (with boss multiplier if applicable)
     const body = meshData.group.getObjectByName('characterBody');
     if (body) {
-      const bossMultiplier = agent.class === 'boss' ? 1.5 : 1.0;
+      const bossMultiplier = (agent.isBoss || agent.class === 'boss') ? 1.5 : 1.0;
       body.scale.setScalar(this.characterScale * bossMultiplier);
     }
 
@@ -418,7 +427,7 @@ export class SceneManager {
       if (!selectedAgent) continue;
 
       // If selected agent is a boss, show their hierarchy
-      if (selectedAgent.class === 'boss' && selectedAgent.subordinateIds) {
+      if ((selectedAgent.isBoss || selectedAgent.class === 'boss') && selectedAgent.subordinateIds) {
         bossesToShow.set(selectedAgent.id, selectedAgent);
         for (const subId of selectedAgent.subordinateIds) {
           subordinateIdsOfSelectedBosses.add(subId);
@@ -428,7 +437,7 @@ export class SceneManager {
       // If selected agent has a boss, show that boss's entire hierarchy
       if (selectedAgent.bossId) {
         const boss = state.agents.get(selectedAgent.bossId);
-        if (boss && boss.class === 'boss' && boss.subordinateIds) {
+        if (boss && (boss.isBoss || boss.class === 'boss') && boss.subordinateIds) {
           bossesToShow.set(boss.id, boss);
           for (const subId of boss.subordinateIds) {
             subordinateIdsOfSelectedBosses.add(subId);
@@ -1007,14 +1016,14 @@ export class SceneManager {
       if (!selectedAgent) continue;
 
       // If selected agent is a boss
-      if (selectedAgent.class === 'boss' && selectedAgent.subordinateIds) {
+      if ((selectedAgent.isBoss || selectedAgent.class === 'boss') && selectedAgent.subordinateIds) {
         bossesToShow.set(selectedAgent.id, selectedAgent);
       }
 
       // If selected agent has a boss
       if (selectedAgent.bossId) {
         const boss = state.agents.get(selectedAgent.bossId);
-        if (boss && boss.class === 'boss' && boss.subordinateIds) {
+        if (boss && (boss.isBoss || boss.class === 'boss') && boss.subordinateIds) {
           bossesToShow.set(boss.id, boss);
         }
       }

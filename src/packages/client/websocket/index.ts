@@ -176,7 +176,10 @@ function handleServerMessage(message: ServerMessage): void {
   switch (message.type) {
     case 'agents_update': {
       const agentList = message.payload as Agent[];
-      console.log(`[Tide] Received ${agentList.length} agents:`, agentList.map(a => ({ name: a.name, sessionId: a.sessionId })));
+      console.log(`[Tide] 📋 Initial agents_update: received ${agentList.length} agents`);
+      agentList.forEach(a => {
+        console.log(`[Tide]   - ${a.name}: status=${a.status}, currentTask=${a.currentTask || 'none'}`);
+      });
       store.setAgents(agentList);
       onAgentsSync?.(agentList);
       // Load tool history after agents are synced
@@ -207,7 +210,12 @@ function handleServerMessage(message: ServerMessage): void {
       const state = store.getState();
       const previousAgent = state.agents.get(updatedAgent.id);
 
-      console.log(`[Tide] Agent updated: ${updatedAgent.id} status=${updatedAgent.status} (was ${previousAgent?.status})`);
+      const statusChanged = previousAgent?.status !== updatedAgent.status;
+      console.log(`[Tide] Agent updated: ${updatedAgent.name} (${updatedAgent.id}) status=${updatedAgent.status} (was ${previousAgent?.status})${statusChanged ? ' ⚡ STATUS CHANGED' : ''}`);
+
+      if (statusChanged) {
+        console.log(`[Tide] 🔔 Status change for ${updatedAgent.name}: ${previousAgent?.status} → ${updatedAgent.status}`);
+      }
 
       const positionChanged = previousAgent
         ? previousAgent.position.x !== updatedAgent.position.x ||

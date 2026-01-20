@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Agent, CustomAgentClass } from '../../../shared/types';
+import type { Agent, CustomAgentClass, BuiltInAgentClass } from '../../../shared/types';
 import { AGENT_CLASS_CONFIG, AGENT_CLASS_MODELS } from '../config';
 import { CharacterLoader } from './CharacterLoader';
 
@@ -66,7 +66,7 @@ export class CharacterFactory {
    */
   private getClassConfig(agentClass: string): { icon: string; color: number; description: string } {
     // Check built-in classes first
-    const builtIn = AGENT_CLASS_CONFIG[agentClass as keyof typeof AGENT_CLASS_CONFIG];
+    const builtIn = AGENT_CLASS_CONFIG[agentClass as BuiltInAgentClass];
     if (builtIn) {
       return builtIn;
     }
@@ -117,7 +117,8 @@ export class CharacterFactory {
     const classConfig = this.getClassConfig(agent.class);
 
     // Boss agents are 1.5x larger (scaling is applied by SceneManager.addAgent)
-    const isBoss = agent.class === 'boss';
+    // Check both isBoss property and class === 'boss' for backward compatibility
+    const isBoss = agent.isBoss === true || agent.class === 'boss';
 
     // Character body (3D model or fallback capsule)
     const { body, mixer, animations } = this.createCharacterBody(agent, classConfig.color);
@@ -796,7 +797,7 @@ export class CharacterFactory {
       const material = selectionRing.material as THREE.MeshBasicMaterial;
       if (isSelected) {
         // Normal selection - use agent's class color
-        const classConfig = AGENT_CLASS_CONFIG[agent.class];
+        const classConfig = AGENT_CLASS_CONFIG[agent.class as BuiltInAgentClass];
         material.color.setHex(classConfig?.color ?? 0xffffff);
         material.opacity = 0.8;
       } else if (isSubordinateOfSelectedBoss) {
@@ -891,7 +892,7 @@ export class CharacterFactory {
     }
 
     // Create new label with class color
-    const classConfig = AGENT_CLASS_CONFIG[agentClass as keyof typeof AGENT_CLASS_CONFIG];
+    const classConfig = AGENT_CLASS_CONFIG[agentClass as BuiltInAgentClass];
     const color = classConfig?.color ?? 0xffffff;
     const newLabel = this.createNameLabel(name, color);
     group.add(newLabel);

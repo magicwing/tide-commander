@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { store, useAgents, useSkillsArray, useCustomAgentClassesArray } from '../store';
 import { AGENT_CLASS_CONFIG, DEFAULT_NAMES, CHARACTER_MODELS } from '../scene/config';
-import type { AgentClass, PermissionMode, Skill, CustomAgentClass, BuiltInAgentClass } from '../../shared/types';
-import { PERMISSION_MODES, BUILT_IN_AGENT_CLASSES } from '../../shared/types';
+import type { AgentClass, PermissionMode, Skill, CustomAgentClass, BuiltInAgentClass, ClaudeModel } from '../../shared/types';
+import { PERMISSION_MODES, BUILT_IN_AGENT_CLASSES, CLAUDE_MODELS } from '../../shared/types';
 import { intToHex } from '../utils/formatting';
 import { ModelPreview } from './ModelPreview';
 
@@ -51,6 +51,7 @@ export function SpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: SpawnM
   const [useChrome, setUseChrome] = useState(true); // Enabled by default
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypass'); // Default to permissionless
   const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(new Set());
+  const [selectedModel, setSelectedModel] = useState<ClaudeModel>('sonnet'); // Default to sonnet
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   // Get available skills (enabled ones)
@@ -195,10 +196,11 @@ export function SpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: SpawnM
       sessionId: selectedSessionId || undefined,
       useChrome,
       permissionMode,
-      initialSkillIds
+      initialSkillIds,
+      model: selectedModel
     });
 
-    store.spawnAgent(name.trim(), selectedClass, effectiveCwd.trim(), undefined, selectedSessionId || undefined, useChrome, permissionMode, initialSkillIds);
+    store.spawnAgent(name.trim(), selectedClass, effectiveCwd.trim(), undefined, selectedSessionId || undefined, useChrome, permissionMode, initialSkillIds, selectedModel);
   };
 
   const handleSuccess = () => {
@@ -390,6 +392,29 @@ export function SpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: SpawnM
             <div className="form-group">
               <label className="form-label">Agent Class</label>
               <div className="class-selector compact">
+                {/* Custom classes first */}
+                {customClasses.length > 0 && (
+                  <>
+                    {customClasses.map((customClass) => (
+                      <div
+                        key={customClass.id}
+                        className={`class-option ${selectedClass === customClass.id ? 'selected' : ''}`}
+                        onClick={() => setSelectedClass(customClass.id)}
+                      >
+                        <div
+                          className="class-icon"
+                          style={{ background: `${customClass.color}20` }}
+                        >
+                          {customClass.icon}
+                        </div>
+                        <div className="class-name">{customClass.name}</div>
+                      </div>
+                    ))}
+                    <div className="class-selector-divider">
+                      <span>Built-in</span>
+                    </div>
+                  </>
+                )}
                 {/* Built-in classes */}
                 {CHARACTER_MODELS.map((char) => {
                   const config = AGENT_CLASS_CONFIG[char.id];
@@ -409,22 +434,6 @@ export function SpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: SpawnM
                     </div>
                   );
                 })}
-                {/* Custom classes */}
-                {customClasses.map((customClass) => (
-                  <div
-                    key={customClass.id}
-                    className={`class-option ${selectedClass === customClass.id ? 'selected' : ''}`}
-                    onClick={() => setSelectedClass(customClass.id)}
-                  >
-                    <div
-                      className="class-icon"
-                      style={{ background: `${customClass.color}20` }}
-                    >
-                      {customClass.icon}
-                    </div>
-                    <div className="class-name">{customClass.name}</div>
-                  </div>
-                ))}
               </div>
             </div>
 
@@ -511,6 +520,25 @@ export function SpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: SpawnM
                   Use Chrome browser
                 </span>
               </label>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Claude Model</label>
+              <div className="model-selector">
+                {(Object.keys(CLAUDE_MODELS) as ClaudeModel[]).map((model) => (
+                  <div
+                    key={model}
+                    className={`model-option ${selectedModel === model ? 'selected' : ''}`}
+                    onClick={() => setSelectedModel(model)}
+                  >
+                    <div className="model-icon">{CLAUDE_MODELS[model].icon}</div>
+                    <div className="model-info">
+                      <div className="model-label">{CLAUDE_MODELS[model].label}</div>
+                      <div className="model-desc">{CLAUDE_MODELS[model].description}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
 
             <div className="form-group">

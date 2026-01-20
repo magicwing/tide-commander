@@ -85,7 +85,7 @@ function unlinkAgentFromBossHierarchy(agentId: string): void {
   }
 
   // If this agent is a boss, unlink all subordinates
-  if (agent.class === 'boss' && agent.subordinateIds?.length) {
+  if ((agent.isBoss || agent.class === 'boss') && agent.subordinateIds?.length) {
     for (const subId of agent.subordinateIds) {
       try {
         // Clear the bossId from subordinate
@@ -115,6 +115,7 @@ function handleClientMessage(ws: WebSocket, message: ClientMessage): void {
         permissionMode: message.payload.permissionMode,
         position: message.payload.position,
         initialSkillIds: message.payload.initialSkillIds,
+        model: message.payload.model,
       });
 
       agentService
@@ -125,7 +126,10 @@ function handleClientMessage(ws: WebSocket, message: ClientMessage): void {
           message.payload.position,
           message.payload.sessionId,
           message.payload.useChrome,
-          message.payload.permissionMode
+          message.payload.permissionMode,
+          undefined, // initialSkillIds handled separately below
+          undefined, // isBoss
+          message.payload.model
         )
         .then((agent) => {
           log.log('✅ [SPAWN_AGENT] Agent created successfully:', {
@@ -196,7 +200,7 @@ function handleClientMessage(ws: WebSocket, message: ClientMessage): void {
         const agent = agentService.getAgent(agentId);
 
         // If this is a boss agent, handle differently based on command type
-        if (agent?.class === 'boss') {
+        if (agent?.isBoss || agent?.class === 'boss') {
           log.log(` Boss ${agent.name} received command: "${command.slice(0, 50)}..."`);
 
           // Track the last command sent to this boss (for delegation parsing)
@@ -383,6 +387,9 @@ function handleClientMessage(ws: WebSocket, message: ClientMessage): void {
         break;
       }
 
+      // Track if model changed (requires session restart)
+      const modelChanged = updates.model !== undefined && updates.model !== agent.model;
+
       // Update agent properties
       const agentUpdates: Partial<Agent> = {};
 
@@ -394,9 +401,31 @@ function handleClientMessage(ws: WebSocket, message: ClientMessage): void {
         agentUpdates.permissionMode = updates.permissionMode;
       }
 
+      if (updates.model !== undefined) {
+        agentUpdates.model = updates.model;
+      }
+
       // Apply agent property updates if any
       if (Object.keys(agentUpdates).length > 0) {
         agentService.updateAgent(agentId, agentUpdates, false);
+      }
+
+      // If model changed, restart the agent session
+      if (modelChanged) {
+        log.log(`🔄 Agent ${agent.name}: Model changed to ${updates.model}, restarting session`);
+        claudeService.stopAgent(agentId).then(() => {
+          agentService.updateAgent(agentId, {
+            status: 'idle',
+            currentTask: undefined,
+            currentTool: undefined,
+            sessionId: undefined, // Clear session to force new one with new model
+            tokensUsed: 0,
+            contextUsed: 0,
+          });
+          sendActivity(agentId, `Session restarted - model changed to ${updates.model}`);
+        }).catch(err => {
+          log.error(`🔄 Failed to restart agent ${agent.name} after model change:`, err);
+        });
       }
 
       // Handle skill reassignment
@@ -563,12 +592,15 @@ function handleClientMessage(ws: WebSocket, message: ClientMessage): void {
       agentService
         .createAgent(
           message.payload.name,
-          'boss', // Always boss class
+          message.payload.class || 'boss', // Use selected class or default to 'boss'
           message.payload.cwd,
           message.payload.position,
           undefined, // sessionId - bosses start fresh
           message.payload.useChrome,
-          message.payload.permissionMode
+          message.payload.permissionMode,
+          undefined, // initialSkillIds
+          true, // isBoss flag
+          message.payload.model
         )
         .then((agent) => {
           // Assign initial subordinates if provided
@@ -1675,7 +1707,7 @@ function setupServiceListeners(): void {
     // For boss agents, parse delegation and spawn blocks from step_complete result text
     if (event.type === 'step_complete' && event.resultText) {
       const agent = agentService.getAgent(agentId);
-      if (agent?.class === 'boss') {
+      if (agent?.isBoss || agent?.class === 'boss') {
         log.log(`🟣🟣🟣 step_complete EVENT for boss ${agent.name}, resultText length: ${event.resultText.length}`);
         parseBossDelegation(agentId, agent.name, event.resultText);
         parseBossSpawn(agentId, agent.name, event.resultText);

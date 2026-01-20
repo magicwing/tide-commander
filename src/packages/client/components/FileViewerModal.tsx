@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import Prism from 'prismjs';
 import { DiffViewer } from './DiffViewer';
 import 'prismjs/components/prism-typescript';
@@ -228,7 +229,7 @@ export function FileViewerModal({ isOpen, onClose, filePath, action, editData }:
               />
             ) : isMarkdown ? (
               <div className="file-viewer-markdown markdown-content">
-                <ReactMarkdown>{fileData.content}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{fileData.content}</ReactMarkdown>
               </div>
             ) : (
               <pre className="file-viewer-code">

@@ -4,7 +4,7 @@
  */
 
 import * as fs from 'fs';
-import type { Agent, AgentClass, PermissionMode } from '../../shared/types.js';
+import type { Agent, AgentClass, PermissionMode, ClaudeModel } from '../../shared/types.js';
 import { loadAgents, saveAgents, getDataDir } from '../data/index.js';
 import {
   listSessions,
@@ -48,6 +48,8 @@ export function initAgents(): void {
         contextLimit,
         taskCount: stored.taskCount ?? 0, // Migration for existing agents
         permissionMode: stored.permissionMode ?? 'bypass', // Migration for existing agents
+        // Boss field - fallback to checking class for backward compatibility
+        isBoss: stored.isBoss ?? stored.class === 'boss',
       };
       agents.set(agent.id, agent);
     }
@@ -97,7 +99,10 @@ export async function createAgent(
   position?: { x: number; y: number; z: number },
   sessionId?: string,
   useChrome?: boolean,
-  permissionMode: PermissionMode = 'bypass'
+  permissionMode: PermissionMode = 'bypass',
+  initialSkillIds?: string[],
+  isBoss?: boolean,
+  model?: ClaudeModel
 ): Promise<Agent> {
   log.log('🎆 [CREATE_AGENT] Starting agent creation:', {
     name,
@@ -106,6 +111,8 @@ export async function createAgent(
     sessionId,
     useChrome,
     permissionMode,
+    isBoss,
+    model,
   });
 
   const id = generateId();
@@ -135,6 +142,7 @@ export async function createAgent(
     cwd,
     useChrome,
     permissionMode,
+    model,
     tokensUsed: 0,
     contextUsed: 0,
     contextLimit: 200000, // Claude's default context limit
@@ -142,6 +150,7 @@ export async function createAgent(
     createdAt: Date.now(),
     lastActivity: Date.now(),
     sessionId: sessionId,
+    isBoss: isBoss || agentClass === 'boss', // Boss if explicitly set or class is 'boss'
   };
 
   log.log('  Agent object created:', {

@@ -43,6 +43,15 @@ export const PERMISSION_MODES: Record<PermissionMode, { label: string; descripti
   interactive: { label: 'Interactive', description: 'Ask for approval before sensitive operations' },
 };
 
+// Claude Model - which AI model to use
+export type ClaudeModel = 'sonnet' | 'opus' | 'haiku';
+
+export const CLAUDE_MODELS: Record<ClaudeModel, { label: string; description: string; icon: string }> = {
+  sonnet: { label: 'Sonnet', description: 'Balanced performance and cost (recommended)', icon: '⚡' },
+  opus: { label: 'Opus', description: 'Most capable, higher cost', icon: '🧠' },
+  haiku: { label: 'Haiku', description: 'Fast and economical', icon: '🚀' },
+};
+
 // Detailed context statistics from Claude's /context command
 export interface ContextStats {
   // Model info
@@ -82,6 +91,7 @@ export interface Agent {
   cwd: string;
   useChrome?: boolean; // Start with --chrome flag
   permissionMode: PermissionMode; // How permissions are handled
+  model?: ClaudeModel; // Claude model to use (sonnet, opus, haiku)
 
   // Resources
   tokensUsed: number;
@@ -106,7 +116,8 @@ export interface Agent {
   createdAt: number;
   lastActivity: number;
 
-  // Boss-specific fields (only populated when class === 'boss')
+  // Boss-specific fields
+  isBoss?: boolean;                    // True if this agent can manage subordinates
   subordinateIds?: string[];           // IDs of agents under this boss
   bossId?: string;                     // ID of the boss this agent reports to (if any)
 }
@@ -409,6 +420,7 @@ export interface SpawnAgentMessage extends WSMessage {
     useChrome?: boolean;
     permissionMode?: PermissionMode; // defaults to 'bypass' for backwards compatibility
     initialSkillIds?: string[]; // Skills to assign on creation
+    model?: ClaudeModel; // Claude model to use (defaults to sonnet)
   };
 }
 
@@ -493,7 +505,7 @@ export interface RenameAgentMessage extends WSMessage {
   };
 }
 
-// Update agent properties (class, permission mode, skills)
+// Update agent properties (class, permission mode, skills, model)
 export interface UpdateAgentPropertiesMessage extends WSMessage {
   type: 'update_agent_properties';
   payload: {
@@ -501,6 +513,7 @@ export interface UpdateAgentPropertiesMessage extends WSMessage {
     updates: {
       class?: AgentClass;
       permissionMode?: PermissionMode;
+      model?: ClaudeModel;
       skillIds?: string[];  // Complete list of skill IDs to assign (replaces existing)
     };
   };
@@ -802,11 +815,13 @@ export interface SpawnBossAgentMessage extends WSMessage {
   type: 'spawn_boss_agent';
   payload: {
     name: string;
+    class?: AgentClass;  // Boss class (default: 'boss')
     cwd: string;
     position?: { x: number; y: number; z: number };
     subordinateIds?: string[];  // Initial subordinates (optional)
     useChrome?: boolean;
     permissionMode?: PermissionMode;
+    model?: ClaudeModel; // Claude model to use (defaults to sonnet)
   };
 }
 

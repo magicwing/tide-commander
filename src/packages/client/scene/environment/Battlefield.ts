@@ -1360,15 +1360,12 @@ export class Battlefield {
       { x: -20, z: -18 },
       { x: -22, z: -8 },
       { x: -20, z: 5 },
-      { x: -18, z: 18 },
       { x: 18, z: -20 },
       { x: 22, z: -5 },
       { x: 20, z: 10 },
-      { x: 18, z: 22 },
       { x: -8, z: -22 },
       { x: 5, z: -20 },
-      { x: -5, z: 22 },
-      { x: 10, z: 20 },
+      // Removed trees at z >= 18 - were blocking visibility in background
     ];
 
     treePositions.forEach((pos, i) => {

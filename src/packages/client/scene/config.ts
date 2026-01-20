@@ -1,7 +1,7 @@
-import type { AgentClass } from '../../shared/types';
+import type { AgentClass, BuiltInAgentClass } from '../../shared/types';
 
-// Agent class visual configuration
-export const AGENT_CLASS_CONFIG: Record<AgentClass, { icon: string; color: number; description: string }> = {
+// Agent class visual configuration (built-in classes only)
+export const AGENT_CLASS_CONFIG: Record<BuiltInAgentClass, { icon: string; color: number; description: string }> = {
   scout: { icon: '🔍', color: 0x4a9eff, description: 'Explores and searches codebase' },
   builder: { icon: '🔨', color: 0xff9e4a, description: 'Creates and builds features' },
   debugger: { icon: '🐛', color: 0xff4a4a, description: 'Finds and fixes bugs' },
@@ -11,9 +11,17 @@ export const AGENT_CLASS_CONFIG: Record<AgentClass, { icon: string; color: numbe
   boss: { icon: '👑', color: 0xffd700, description: 'Manages and delegates to subordinates' },
 };
 
+// Default config for custom/unknown classes
+const DEFAULT_CLASS_CONFIG = { icon: '🤖', color: 0x888888, description: 'Custom agent class' };
+
+// Helper to safely get class config (works for both built-in and custom classes)
+export function getAgentClassConfig(agentClass: AgentClass): { icon: string; color: number; description: string } {
+  return AGENT_CLASS_CONFIG[agentClass as BuiltInAgentClass] || DEFAULT_CLASS_CONFIG;
+}
+
 // Default names for agents
 export const DEFAULT_NAMES = [
-  'Elon Musk', 'Steve Jobs', 'Linus Torvalds', 'Jensen', 'Jeff Bezos',
+  'Elon Musk','Marie Curie', 'Claudia Sheinbaum', 'Frida Kahlo', 'Steve Jobs', 'Linus Torvalds', 'Jensen', 'Jeff Bezos',
   'Tim Cook', 'Alan Turing', 'Lisa', 'Satoshi Nakamoto',
 ];
 
@@ -32,7 +40,7 @@ export const AGENT_CLASS_MODELS: Record<AgentClass, string> = {
 };
 
 // Character model display info for the selector (maps to built-in agent classes)
-export const CHARACTER_MODELS: { id: AgentClass; model: string; name: string; gender: string }[] = [
+export const CHARACTER_MODELS: { id: BuiltInAgentClass; model: string; name: string; gender: string }[] = [
   { id: 'scout', model: 'character-male-a.glb', name: 'Explorer', gender: 'Male' },
   { id: 'builder', model: 'character-male-b.glb', name: 'Crafter', gender: 'Male' },
   { id: 'architect', model: 'character-male-c.glb', name: 'Planner', gender: 'Male' },

@@ -354,6 +354,7 @@ async function executeCommand(agentId: string, command: string, systemPrompt?: s
     prompt: command,
     workingDir: agent.cwd,
     sessionId: agent.sessionId,
+    model: agent.model,
     useChrome: agent.useChrome,
     permissionMode: agent.permissionMode,
     systemPrompt,
@@ -483,12 +484,14 @@ export async function syncAgentStatus(agentId: string): Promise<void> {
 
   // If we're tracking the process, trust the current status - no need to sync
   if (isTrackedProcess) {
+    log.log(`🔍 [${agent.name}] sync skipped - runner is tracking process (status=${agent.status})`);
     return;
   }
 
   // Check 2: Session file activity - is there recent pending work?
   let isRecentlyActive = false;
   let hasPendingWork = false;
+  let sessionCheckError: string | null = null;
 
   if (agent.sessionId && agent.cwd) {
     try {
@@ -497,14 +500,21 @@ export async function syncAgentStatus(agentId: string): Promise<void> {
       if (activity) {
         isRecentlyActive = activity.isActive; // Modified within 30s AND has pending work
         hasPendingWork = activity.hasPendingWork;
+      } else {
+        sessionCheckError = 'session file not found';
       }
-    } catch {
-      // Ignore errors
+    } catch (err) {
+      sessionCheckError = String(err);
     }
+  } else {
+    sessionCheckError = `missing sessionId=${agent.sessionId} or cwd=${agent.cwd}`;
   }
 
   // Check 3: Does the tmux session have an active Claude process?
   const hasOrphanedProcess = checkTmuxHasClaudeProcess(agent.tmuxSession);
+
+  // Debug log for every sync check
+  log.log(`🔍 [${agent.name}] sync check: status=${agent.status}, tracked=${isTrackedProcess}, recentlyActive=${isRecentlyActive}, hasPendingWork=${hasPendingWork}, orphanedProcess=${hasOrphanedProcess}, tmux=${agent.tmuxSession}${sessionCheckError ? `, sessionErr=${sessionCheckError}` : ''}`);
 
   // Case 1: Agent shows 'working' but no tracked process and not recently active -> set to idle
   if (agent.status === 'working' && !isRecentlyActive && !hasOrphanedProcess) {
@@ -541,6 +551,10 @@ export async function syncAgentStatus(agentId: string): Promise<void> {
       currentTask: undefined,
       currentTool: undefined,
     });
+  }
+  // No change needed
+  else {
+    log.log(`✅ [${agent.name}] sync: no change needed (status=${agent.status})`);
   }
 }
 

@@ -117,18 +117,20 @@ function emit(event: string, data: unknown): void {
 
 /**
  * Check if an agent is a boss
+ * Checks both isBoss property and class === 'boss' for backward compatibility
  */
 export function isBossAgent(agentId: string): boolean {
   const agent = agentService.getAgent(agentId);
-  return agent?.class === 'boss';
+  return agent?.isBoss === true || agent?.class === 'boss';
 }
 
 /**
  * Get a boss agent by ID (returns null if not a boss)
+ * Checks both isBoss property and class === 'boss' for backward compatibility
  */
 export function getBossAgent(agentId: string): Agent | null {
   const agent = agentService.getAgent(agentId);
-  if (agent?.class !== 'boss') return null;
+  if (!agent?.isBoss && agent?.class !== 'boss') return null;
   return agent;
 }
 
@@ -154,7 +156,7 @@ export function assignSubordinates(bossId: string, subordinateIds: string[]): vo
       log.log?.(`  Skipping invalid subordinate ID: ${subId}`);
       continue;
     }
-    if (sub.class === 'boss') {
+    if (sub.isBoss || sub.class === 'boss') {
       log.log?.(`  Skipping boss agent as subordinate: ${sub.name}`);
       continue;
     }

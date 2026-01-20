@@ -5,7 +5,7 @@ import { formatNumber, intToHex, formatTokens, formatTimeAgo, formatIdleTime, ge
 import { ModelPreview } from './ModelPreview';
 import { AgentEditModal } from './AgentEditModal';
 import { ContextViewModal } from './ContextViewModal';
-import type { Agent, DrawingArea, AgentSupervisorHistoryEntry, PermissionMode, DelegationDecision, CustomAgentClass } from '../../shared/types';
+import type { Agent, DrawingArea, AgentSupervisorHistoryEntry, PermissionMode, DelegationDecision, CustomAgentClass, BuiltInAgentClass } from '../../shared/types';
 import { PERMISSION_MODES, AGENT_CLASSES } from '../../shared/types';
 
 // Helper to normalize color to hex string
@@ -16,7 +16,7 @@ function normalizeColor(color: number | string): string {
 
 // Helper to get class config (built-in or custom)
 function getClassConfig(agentClass: string, customClasses: CustomAgentClass[]): { icon: string; color: string; description?: string } {
-  const builtIn = AGENT_CLASS_CONFIG[agentClass];
+  const builtIn = AGENT_CLASS_CONFIG[agentClass as BuiltInAgentClass];
   if (builtIn) {
     return {
       icon: builtIn.icon,
@@ -620,7 +620,7 @@ function SingleAgentPanel({ agent: agentProp, onFocusAgent, onKillAgent, onCallS
           >
             ✏️
           </button>
-          {agent.class === 'boss' && agent.subordinateIds && agent.subordinateIds.length > 0 && (
+          {(agent.isBoss || agent.class === 'boss') && agent.subordinateIds && agent.subordinateIds.length > 0 && (
             <button
               className="unit-action-icon"
               onClick={() => onCallSubordinates?.(agent.id)}
@@ -868,7 +868,7 @@ function SingleAgentPanel({ agent: agentProp, onFocusAgent, onKillAgent, onCallS
       </div>
 
       {/* Boss-Specific Section */}
-      {agent.class === 'boss' && (
+      {(agent.isBoss || agent.class === 'boss') && (
         <BossAgentSection agent={agent} />
       )}
 
@@ -878,7 +878,7 @@ function SingleAgentPanel({ agent: agentProp, onFocusAgent, onKillAgent, onCallS
       )}
 
       {/* Link to Boss option (if agent is not a boss and has no boss) */}
-      {agent.class !== 'boss' && !agent.bossId && (
+      {agent.class !== 'boss' && !agent.isBoss && !agent.bossId && (
         <LinkToBossSection agentId={agent.id} />
       )}
 
@@ -1338,7 +1338,7 @@ function LinkToBossSection({ agentId }: LinkToBossSectionProps) {
 
   // Get all boss agents
   const bossAgents = Array.from(state.agents.values()).filter(
-    (a) => a.class === 'boss'
+    (a) => a.isBoss === true || a.class === 'boss'
   );
 
   if (bossAgents.length === 0) {

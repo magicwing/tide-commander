@@ -19,6 +19,7 @@ import type {
   DelegationDecision,
   Skill,
   CustomAgentClass,
+  ClaudeModel,
 } from '../../shared/types';
 import { ShortcutConfig, DEFAULT_SHORTCUTS } from './shortcuts';
 import { perf } from '../utils/profiling';
@@ -289,10 +290,18 @@ class Store {
 
   updateAgent(agent: Agent): void {
     // Create a new Map to ensure React detects the change
+    const oldAgent = this.state.agents.get(agent.id);
+    const statusChanged = oldAgent?.status !== agent.status;
+    if (statusChanged) {
+      console.log(`[Store] 🔄 Agent ${agent.name} status update: ${oldAgent?.status} → ${agent.status}`);
+    }
     const newAgents = new Map(this.state.agents);
     newAgents.set(agent.id, agent);
     this.state.agents = newAgents;
     this.notify();
+    if (statusChanged) {
+      console.log(`[Store] ✅ Agent ${agent.name} status now in store: ${this.state.agents.get(agent.id)?.status}`);
+    }
   }
 
   updateAgentContextStats(agentId: string, stats: import('../../shared/types').ContextStats): void {
@@ -659,6 +668,19 @@ class Store {
     // Get current outputs (or empty array)
     const currentOutputs = this.state.agentOutputs.get(agentId) || [];
 
+    // Deduplicate delegation messages - they should only appear once
+    // This prevents the same delegation from showing multiple times when Guake terminal opens
+    if (output.isDelegation) {
+      const isDuplicate = currentOutputs.some(
+        existing => existing.isDelegation && existing.text === output.text
+      );
+      if (isDuplicate) {
+        console.log(`📦 [STORE] Skipping duplicate delegation message for agent ${agentId}`);
+        perf.end('store:addOutput');
+        return;
+      }
+    }
+
     // Create NEW array with the new output appended (immutable update for React reactivity)
     let newOutputs = [...currentOutputs, output];
 
@@ -701,7 +723,8 @@ class Store {
     sessionId?: string,
     useChrome?: boolean,
     permissionMode?: PermissionMode,
-    initialSkillIds?: string[]
+    initialSkillIds?: string[],
+    model?: ClaudeModel
   ): void {
     console.log('[Store] spawnAgent called with:', {
       name,
@@ -711,13 +734,14 @@ class Store {
       sessionId,
       useChrome,
       permissionMode,
-      initialSkillIds
+      initialSkillIds,
+      model
     });
 
     const pos3d = position ? { x: position.x, y: 0, z: position.z } : undefined;
     const message = {
       type: 'spawn_agent' as const,
-      payload: { name, class: agentClass, cwd, position: pos3d, sessionId, useChrome, permissionMode, initialSkillIds },
+      payload: { name, class: agentClass, cwd, position: pos3d, sessionId, useChrome, permissionMode, initialSkillIds, model },
     };
 
     console.log('[Store] Sending WebSocket message:', message);
@@ -863,12 +887,13 @@ class Store {
     });
   }
 
-  // Update agent properties (class, permission mode, skills)
+  // Update agent properties (class, permission mode, skills, model)
   updateAgentProperties(
     agentId: string,
     updates: {
       class?: AgentClass;
       permissionMode?: PermissionMode;
+      model?: ClaudeModel;
       skillIds?: string[];
     }
   ): void {
@@ -881,6 +906,9 @@ class Store {
       }
       if (updates.permissionMode !== undefined) {
         updatedAgent.permissionMode = updates.permissionMode;
+      }
+      if (updates.model !== undefined) {
+        updatedAgent.model = updates.model;
       }
       const newAgents = new Map(this.state.agents);
       newAgents.set(agentId, updatedAgent);
@@ -1373,16 +1401,18 @@ class Store {
    */
   spawnBossAgent(
     name: string,
+    agentClass: AgentClass,
     cwd: string,
     position?: { x: number; z: number },
     subordinateIds?: string[],
     useChrome?: boolean,
-    permissionMode?: PermissionMode
+    permissionMode?: PermissionMode,
+    model?: ClaudeModel
   ): void {
     const pos3d = position ? { x: position.x, y: 0, z: position.z } : undefined;
     this.sendMessage?.({
       type: 'spawn_boss_agent',
-      payload: { name, cwd, position: pos3d, subordinateIds, useChrome, permissionMode },
+      payload: { name, class: agentClass, cwd, position: pos3d, subordinateIds, useChrome, permissionMode, model },
     });
   }
 
@@ -1541,7 +1571,7 @@ class Store {
    */
   isBossAgent(agentId: string): boolean {
     const agent = this.state.agents.get(agentId);
-    return agent?.class === 'boss';
+    return agent?.isBoss === true || agent?.class === 'boss';
   }
 
   /**
@@ -1961,7 +1991,7 @@ export function useBossAgents(): Agent[] {
   const agents = useAgents();
   const arrayRef = useRef<Agent[]>([]);
 
-  const newArray = Array.from(agents.values()).filter(a => a.class === 'boss');
+  const newArray = Array.from(agents.values()).filter(a => a.isBoss === true || a.class === 'boss');
   if (!shallowArrayEqual(arrayRef.current, newArray)) {
     arrayRef.current = newArray;
   }

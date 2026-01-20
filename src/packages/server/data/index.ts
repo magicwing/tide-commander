@@ -57,6 +57,7 @@ export interface StoredAgent {
   lastSessionId?: string;
   currentTask?: string;
   // Boss-specific fields
+  isBoss?: boolean;           // True if this agent is a boss
   subordinateIds?: string[];  // Only for boss agents
   bossId?: string;            // ID of boss this agent reports to
 }
@@ -120,6 +121,7 @@ export function saveAgents(agents: Agent[]): void {
       sessionId: agent.sessionId,
       currentTask: agent.currentTask,
       // Boss-specific fields
+      isBoss: agent.isBoss,
       subordinateIds: agent.subordinateIds,
       bossId: agent.bossId,
     }));

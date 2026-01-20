@@ -116,6 +116,11 @@ function AppContent() {
       persistedScene.reattach(canvasRef.current, selectionBoxRef.current);
       sceneRef.current = persistedScene;
       console.log('[Tide] Reattached existing scene (HMR)');
+      // Re-apply custom classes from store on reattach (in case they were updated)
+      const customClasses = store.getState().customAgentClasses;
+      if (customClasses.size > 0) {
+        persistedScene.setCustomAgentClasses(customClasses);
+      }
     } else {
       const scene = new SceneManager(canvasRef.current, selectionBoxRef.current);
       sceneRef.current = scene;
@@ -136,6 +141,12 @@ function AppContent() {
       // Load character models then upgrade any existing agents
       scene.loadCharacterModels().then(() => {
         console.log('[Tide] Character models ready');
+        // Apply custom classes from store (they may have arrived via WebSocket before models loaded)
+        const customClasses = store.getState().customAgentClasses;
+        if (customClasses.size > 0) {
+          console.log('[Tide] Applying custom classes from store:', customClasses.size);
+          scene.setCustomAgentClasses(customClasses);
+        }
         scene.upgradeAgentModels();
       }).catch((err) => {
         console.warn('[Tide] Some models failed to load, using fallback:', err);
@@ -187,6 +198,9 @@ function AppContent() {
       },
       onCustomClassesSync: (classes) => {
         sceneRef.current?.setCustomAgentClasses(classes);
+        // Upgrade agent models now that custom classes are available
+        // This fixes the race condition where agents arrive before custom classes
+        sceneRef.current?.upgradeAgentModels();
       },
     });
 

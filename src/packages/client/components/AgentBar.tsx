@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useStore, store, useCustomAgentClassesArray } from '../store';
-import type { Agent, DrawingArea, AgentSupervisorHistoryEntry, CustomAgentClass } from '../../shared/types';
+import type { Agent, DrawingArea, AgentSupervisorHistoryEntry, CustomAgentClass, BuiltInAgentClass } from '../../shared/types';
 import { AGENT_CLASS_CONFIG } from '../scene/config';
 import { formatIdleTime, getIdleTimerColor, intToHex } from '../utils/formatting';
 
 // Helper to get class config (built-in or custom)
 function getClassConfig(agentClass: string, customClasses: CustomAgentClass[]): { icon: string; color: string; description: string } {
-  const builtIn = AGENT_CLASS_CONFIG[agentClass];
+  const builtIn = AGENT_CLASS_CONFIG[agentClass as BuiltInAgentClass];
   if (builtIn) {
     const color = typeof builtIn.color === 'number' ? intToHex(builtIn.color) : builtIn.color;
     return { icon: builtIn.icon, color, description: builtIn.description || '' };

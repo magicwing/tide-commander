@@ -1,8 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { store, useStore } from '../store';
-import { AGENT_CLASS_CONFIG, DEFAULT_NAMES } from '../scene/config';
-import type { Agent, PermissionMode } from '../../shared/types';
-import { PERMISSION_MODES, AGENT_CLASSES } from '../../shared/types';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { store, useStore, useCustomAgentClassesArray } from '../store';
+import { AGENT_CLASS_CONFIG, DEFAULT_NAMES, CHARACTER_MODELS } from '../scene/config';
+import type { Agent, AgentClass, PermissionMode, BuiltInAgentClass, ClaudeModel } from '../../shared/types';
+import { PERMISSION_MODES, AGENT_CLASSES, CLAUDE_MODELS } from '../../shared/types';
+import { intToHex } from '../utils/formatting';
+import { ModelPreview } from './ModelPreview';
 
 interface BossSpawnModalProps {
   isOpen: boolean;
@@ -25,18 +27,44 @@ function getRandomBossName(usedNames: Set<string>): string {
 
 export function BossSpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: BossSpawnModalProps) {
   const { agents } = useStore();
+  const customClasses = useCustomAgentClassesArray();
   const [name, setName] = useState('');
   const [cwd, setCwd] = useState(() => localStorage.getItem('tide-last-cwd') || '');
+  const [selectedClass, setSelectedClass] = useState<AgentClass>('boss');
   const [isSpawning, setIsSpawning] = useState(false);
   const [hasError, setHasError] = useState(false);
   const [useChrome, setUseChrome] = useState(true);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypass');
+  const [selectedModel, setSelectedModel] = useState<ClaudeModel>('haiku');
   const [selectedSubordinates, setSelectedSubordinates] = useState<Set<string>>(new Set());
   const nameInputRef = useRef<HTMLInputElement>(null);
 
+  // Get custom class config if selected class is custom
+  const selectedCustomClass = useMemo(() => {
+    return customClasses.find(c => c.id === selectedClass);
+  }, [customClasses, selectedClass]);
+
+  // Get the visual model file for preview
+  const previewModelFile = useMemo((): string | undefined => {
+    if (selectedCustomClass?.model) {
+      return selectedCustomClass.model;
+    }
+    return undefined;
+  }, [selectedCustomClass]);
+
+  // Agent class for ModelPreview (only used when no custom model file)
+  const previewAgentClass = useMemo((): BuiltInAgentClass => {
+    if (selectedCustomClass) {
+      return 'scout';
+    }
+    // Default built-in classes
+    if (selectedClass === 'boss') return 'architect'; // Boss uses architect model
+    return selectedClass as BuiltInAgentClass;
+  }, [selectedClass, selectedCustomClass]);
+
   // Get available subordinates (non-boss agents without a boss)
   const availableSubordinates = Array.from(agents.values()).filter(
-    (agent) => agent.class !== 'boss' && !agent.bossId
+    (agent) => !agent.isBoss && agent.class !== 'boss' && !agent.bossId
   );
 
   // Generate a new name when modal opens
@@ -72,11 +100,13 @@ export function BossSpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: Bo
 
     store.spawnBossAgent(
       name.trim(),
+      selectedClass,
       cwd.trim(),
       undefined,
       Array.from(selectedSubordinates),
       useChrome,
-      permissionMode
+      permissionMode,
+      selectedModel
     );
   };
 
@@ -143,12 +173,16 @@ export function BossSpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: Bo
         </div>
 
         <div className="modal-body boss-spawn-modal-body">
-          {/* Boss Icon Display */}
-          <div className="boss-preview-section">
-            <div className="boss-preview-icon" style={{ color: bossConfig.color }}>
-              {bossConfig.icon}
+          {/* Model Preview */}
+          <div className="spawn-preview-section">
+            <ModelPreview agentClass={previewAgentClass} modelFile={previewModelFile} width={180} height={220} />
+            <div className="spawn-preview-name">
+              {selectedCustomClass
+                ? `${selectedCustomClass.icon} ${selectedCustomClass.name}`
+                : selectedClass === 'boss'
+                  ? `${bossConfig.icon} Boss`
+                  : CHARACTER_MODELS.find((c) => c.id === selectedClass)?.name || selectedClass}
             </div>
-            <div className="boss-preview-desc">{bossConfig.description}</div>
           </div>
 
           {/* Form */}
@@ -180,6 +214,68 @@ export function BossSpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: Bo
             </div>
 
             <div className="form-group">
+              <label className="form-label">Boss Class</label>
+              <div className="class-selector compact">
+                {/* Custom classes first */}
+                {customClasses.length > 0 && (
+                  <>
+                    {customClasses.map((customClass) => (
+                      <div
+                        key={customClass.id}
+                        className={`class-option ${selectedClass === customClass.id ? 'selected' : ''}`}
+                        onClick={() => setSelectedClass(customClass.id)}
+                      >
+                        <div
+                          className="class-icon"
+                          style={{ background: `${customClass.color}20` }}
+                        >
+                          {customClass.icon}
+                        </div>
+                        <div className="class-name">{customClass.name}</div>
+                      </div>
+                    ))}
+                    <div className="class-selector-divider">
+                      <span>Built-in</span>
+                    </div>
+                  </>
+                )}
+                {/* Boss class option */}
+                <div
+                  className={`class-option ${selectedClass === 'boss' ? 'selected' : ''}`}
+                  onClick={() => setSelectedClass('boss')}
+                >
+                  <div
+                    className="class-icon"
+                    style={{ background: `${bossConfig.color}20` }}
+                  >
+                    {bossConfig.icon}
+                  </div>
+                  <div className="class-name">Boss</div>
+                </div>
+                {/* Built-in classes */}
+                {CHARACTER_MODELS.map((char) => {
+                  const config = AGENT_CLASS_CONFIG[char.id];
+                  if (!config) return null;
+                  return (
+                    <div
+                      key={char.id}
+                      className={`class-option ${selectedClass === char.id ? 'selected' : ''}`}
+                      onClick={() => setSelectedClass(char.id)}
+                    >
+                      <div
+                        className="class-icon"
+                        style={{ background: `${intToHex(config.color)}20` }}
+                      >
+                        {config.icon}
+                      </div>
+                      <div className="class-name">{char.name}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="form-group">
               <label className="form-label">
                 Initial Subordinates
                 <span className="form-label-hint">(optional, can add later)</span>
@@ -192,7 +288,9 @@ export function BossSpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: Bo
                 ) : (
                   availableSubordinates.map((agent) => {
                     const isSelected = selectedSubordinates.has(agent.id);
-                    const classConfig = AGENT_CLASSES[agent.class as keyof typeof AGENT_CLASSES];
+                    const builtInConfig = AGENT_CLASSES[agent.class as keyof typeof AGENT_CLASSES];
+                    const customConfig = customClasses.find(c => c.id === agent.class);
+                    const classConfig = builtInConfig || customConfig || { icon: '🤖', color: '#888888' };
                     return (
                       <div
                         key={agent.id}
@@ -243,6 +341,25 @@ export function BossSpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: Bo
                   Use Chrome browser
                 </span>
               </label>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Claude Model</label>
+              <div className="model-selector">
+                {(Object.keys(CLAUDE_MODELS) as ClaudeModel[]).map((model) => (
+                  <div
+                    key={model}
+                    className={`model-option ${selectedModel === model ? 'selected' : ''}`}
+                    onClick={() => setSelectedModel(model)}
+                  >
+                    <div className="model-icon">{CLAUDE_MODELS[model].icon}</div>
+                    <div className="model-info">
+                      <div className="model-label">{CLAUDE_MODELS[model].label}</div>
+                      <div className="model-desc">{CLAUDE_MODELS[model].description}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
 
             <div className="form-group">

@@ -7,8 +7,8 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { store, useSkillsArray, useCustomAgentClassesArray } from '../store';
 import { ModelPreview } from './ModelPreview';
 import { ALL_CHARACTER_MODELS, CHARACTER_MODELS } from '../scene/config';
-import type { Agent, AgentClass, PermissionMode, Skill, BuiltInAgentClass } from '../../shared/types';
-import { BUILT_IN_AGENT_CLASSES, PERMISSION_MODES } from '../../shared/types';
+import type { Agent, AgentClass, PermissionMode, Skill, BuiltInAgentClass, ClaudeModel } from '../../shared/types';
+import { BUILT_IN_AGENT_CLASSES, PERMISSION_MODES, CLAUDE_MODELS } from '../../shared/types';
 
 interface AgentEditModalProps {
   agent: Agent;
@@ -23,6 +23,7 @@ export function AgentEditModal({ agent, isOpen, onClose }: AgentEditModalProps) 
   // Form state
   const [selectedClass, setSelectedClass] = useState<AgentClass>(agent.class);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(agent.permissionMode);
+  const [selectedModel, setSelectedModel] = useState<ClaudeModel>(agent.model || 'sonnet');
   const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(new Set());
 
   // Get skills currently assigned to this agent
@@ -48,6 +49,7 @@ export function AgentEditModal({ agent, isOpen, onClose }: AgentEditModalProps) 
     if (isOpen) {
       setSelectedClass(agent.class);
       setPermissionMode(agent.permissionMode);
+      setSelectedModel(agent.model || 'sonnet');
       const directlyAssigned = allSkills
         .filter(s => s.assignedAgentIds.includes(agent.id))
         .map(s => s.id);
@@ -102,6 +104,7 @@ export function AgentEditModal({ agent, isOpen, onClose }: AgentEditModalProps) 
   const hasChanges = useMemo(() => {
     if (selectedClass !== agent.class) return true;
     if (permissionMode !== agent.permissionMode) return true;
+    if (selectedModel !== (agent.model || 'sonnet')) return true;
 
     // Check skill changes
     const currentDirectSkills = allSkills
@@ -113,13 +116,14 @@ export function AgentEditModal({ agent, isOpen, onClose }: AgentEditModalProps) 
     if (currentDirectSkills !== newSkills) return true;
 
     return false;
-  }, [selectedClass, permissionMode, selectedSkillIds, agent, allSkills]);
+  }, [selectedClass, permissionMode, selectedModel, selectedSkillIds, agent, allSkills]);
 
   // Handle save
   const handleSave = () => {
     const updates: {
       class?: AgentClass;
       permissionMode?: PermissionMode;
+      model?: ClaudeModel;
       skillIds?: string[];
     } = {};
 
@@ -129,6 +133,10 @@ export function AgentEditModal({ agent, isOpen, onClose }: AgentEditModalProps) 
 
     if (permissionMode !== agent.permissionMode) {
       updates.permissionMode = permissionMode;
+    }
+
+    if (selectedModel !== (agent.model || 'sonnet')) {
+      updates.model = selectedModel;
     }
 
     // Always send skill IDs if changed
@@ -252,6 +260,39 @@ export function AgentEditModal({ agent, isOpen, onClose }: AgentEditModalProps) 
             <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>
               {PERMISSION_MODES[permissionMode].description}
             </div>
+          </div>
+
+          {/* Model Selection */}
+          <div className="form-section" style={{ marginBottom: '16px' }}>
+            <label className="form-label">Claude Model</label>
+            <div className="model-selector">
+              {(Object.keys(CLAUDE_MODELS) as ClaudeModel[]).map((model) => (
+                <div
+                  key={model}
+                  className={`model-option ${selectedModel === model ? 'selected' : ''}`}
+                  onClick={() => setSelectedModel(model)}
+                >
+                  <div className="model-icon">{CLAUDE_MODELS[model].icon}</div>
+                  <div className="model-info">
+                    <div className="model-label">{CLAUDE_MODELS[model].label}</div>
+                    <div className="model-desc">{CLAUDE_MODELS[model].description}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {selectedModel !== (agent.model || 'sonnet') && (
+              <div style={{
+                marginTop: '8px',
+                padding: '8px 10px',
+                background: 'rgba(255, 184, 108, 0.15)',
+                border: '1px solid rgba(255, 184, 108, 0.3)',
+                borderRadius: '6px',
+                fontSize: '11px',
+                color: 'var(--accent-orange)',
+              }}>
+                ⚠️ Changing model will restart the agent session
+              </div>
+            )}
           </div>
 
           {/* Skills Assignment */}

@@ -115,10 +115,11 @@ export function CommanderView({ isOpen, onClose }: CommanderViewProps) {
   // Sort and filter agents by active tab
   // Bosses always appear first, then sorted by creation time
   const filteredAgents = useMemo(() => {
+    const isBoss = (agent: Agent) => agent.isBoss === true || agent.class === 'boss';
     const agents = Array.from(state.agents.values()).sort((a, b) => {
       // Bosses first
-      if (a.class === 'boss' && b.class !== 'boss') return -1;
-      if (a.class !== 'boss' && b.class === 'boss') return 1;
+      if (isBoss(a) && !isBoss(b)) return -1;
+      if (!isBoss(a) && isBoss(b)) return 1;
       // Then by creation time
       return (a.createdAt || 0) - (b.createdAt || 0);
     });
@@ -837,7 +838,7 @@ function AgentPanel({ agent, history, outputs, isExpanded, isFocused, advancedVi
             title={agent.status}
           />
           <span className="agent-panel-name">
-            {agent.class === 'boss' && <span className="agent-panel-boss-crown">👑</span>}
+            {(agent.isBoss || agent.class === 'boss') && <span className="agent-panel-boss-crown">👑</span>}
             {agent.name}
           </span>
           <span className="agent-panel-class">{agent.class}</span>

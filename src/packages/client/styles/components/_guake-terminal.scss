@@ -2555,47 +2555,84 @@
 // ============================================================================
 
 .delegated-task-header {
-  display: flex;
+  display: inline-flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  border-radius: $radius-md;
-  background: linear-gradient(135deg, rgba($dracula-purple, 0.15) 0%, rgba($dracula-pink, 0.1) 100%);
-  border: 1px solid rgba($dracula-purple, 0.4);
-  margin-bottom: 4px;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: $radius-sm;
+  background: rgba($dracula-purple, 0.12);
+  border: 1px solid rgba($dracula-purple, 0.25);
+  transition: all 0.15s ease;
+
+  &.compact {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+  }
+
+  &.expanded {
+    padding: 8px 10px;
+    background: linear-gradient(135deg, rgba($dracula-purple, 0.15) 0%, rgba($dracula-pink, 0.08) 100%);
+    border-color: rgba($dracula-purple, 0.35);
+  }
 }
 
 .delegated-task-badge {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+
+  &:hover {
+    .delegated-task-toggle {
+      color: $dracula-purple;
+    }
+  }
 }
 
 .delegated-task-icon {
-  font-size: 16px;
+  font-size: 12px;
   line-height: 1;
 }
 
 .delegated-task-label {
   font-family: $font-mono;
-  font-size: 11px;
-  color: $dracula-purple;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  font-size: 10px;
+  color: rgba($dracula-purple, 0.8);
+  letter-spacing: 0.3px;
 
   strong {
     color: $dracula-pink;
-    font-weight: 700;
+    font-weight: 600;
   }
+}
+
+.delegated-task-toggle {
+  font-size: 8px;
+  color: rgba($dracula-purple, 0.5);
+  margin-left: 2px;
+  transition: color 0.15s ease;
+}
+
+.delegated-task-preview {
+  font-family: $font-mono;
+  font-size: 11px;
+  color: rgba($dracula-fg, 0.7);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 400px;
 }
 
 .delegated-task-command {
   font-family: $font-mono;
-  font-size: 12px;
+  font-size: 11px;
   color: $dracula-fg;
-  line-height: 1.5;
-  padding: 8px 10px;
-  background: rgba($dracula-bg-darker, 0.6);
+  line-height: 1.4;
+  padding: 6px 8px;
+  background: rgba($dracula-bg-darker, 0.5);
   border-radius: $radius-sm;
-  border-left: 3px solid $dracula-purple;
+  border-left: 2px solid $dracula-purple;
+  margin-top: 4px;
 }
