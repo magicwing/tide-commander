@@ -952,15 +952,28 @@ function AboutSection() {
 
       <div className="about-credits">
         <div className="about-credits-title">Special Thanks</div>
-        <a
-          href="https://kenney.nl"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="about-credit-link"
-        >
-          Kenney.nl
-        </a>
-        <span className="about-credit-desc">for the agent character models</span>
+        <div className="about-credit-item">
+          <a
+            href="https://kenney.nl"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="about-credit-link"
+          >
+            Kenney.nl
+          </a>
+          <span className="about-credit-desc">for the agent character models</span>
+        </div>
+        <div className="about-credit-item">
+          <a
+            href="https://claude.ai/code"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="about-credit-link"
+          >
+            Claude Code
+          </a>
+          <span className="about-credit-desc">by Anthropic, the AI backbone</span>
+        </div>
       </div>
     </div>
   );

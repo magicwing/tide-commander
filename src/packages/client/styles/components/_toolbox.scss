@@ -1085,6 +1085,14 @@
   margin-bottom: 6px;
 }
 
+.about-credit-item {
+  margin-bottom: 6px;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
 .about-credit-link {
   color: $accent-blue;
   text-decoration: none;
