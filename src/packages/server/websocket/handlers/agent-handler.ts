@@ -8,6 +8,7 @@ import type { Agent } from '../../../shared/types.js';
 import { agentService, claudeService, skillService, customClassService, bossService } from '../../services/index.js';
 import { createLogger } from '../../utils/index.js';
 import type { HandlerContext } from './types.js';
+import { clearOutputDedup } from '../handler.js';
 
 const log = createLogger('AgentHandler');
 
@@ -146,6 +147,7 @@ export async function handleKillAgent(
 
   await claudeService.stopAgent(payload.agentId);
   unlinkAgentFromBossHierarchy(payload.agentId);
+  clearOutputDedup(payload.agentId); // Clean up dedup cache
   agentService.deleteAgent(payload.agentId);
 
   log.log(`Agent ${agent?.name || payload.agentId}: Agent deleted successfully`);
@@ -257,6 +259,7 @@ export function handleRemoveAgent(
   payload: { agentId: string }
 ): void {
   unlinkAgentFromBossHierarchy(payload.agentId);
+  clearOutputDedup(payload.agentId); // Clean up dedup cache
   agentService.deleteAgent(payload.agentId);
 }
 

@@ -1,0 +1,214 @@
+/**
+ * Shared hook for filtering outputs based on view mode
+ * Used by both ClaudeOutputPanel (Guake) and CommanderView (AgentPanel)
+ */
+
+import { useMemo } from 'react';
+import type { ClaudeOutput } from '../../store/types';
+import { extractToolKeyParam } from '../../utils/outputRendering';
+
+// Edit data for file viewer
+export interface EditData {
+  oldString: string;
+  newString: string;
+}
+
+// Extended output type with tool enrichment
+export type EnrichedOutput = ClaudeOutput & {
+  _toolKeyParam?: string;
+  _editData?: EditData;
+};
+
+// Bash command truncation length in simple view
+const BASH_TRUNCATE_LENGTH = 300;
+
+/**
+ * Helper to determine if output should be shown in simple view
+ */
+export function isSimpleViewOutput(text: string): boolean {
+  // SHOW tool names (will render with nice icons)
+  if (text.startsWith('Using tool:')) return true;
+
+  // HIDE tool input/result details
+  if (text.startsWith('Tool input:')) return false;
+  if (text.startsWith('Tool result:')) return false;
+
+  // HIDE stats and system messages
+  if (text.startsWith('Tokens:')) return false;
+  if (text.startsWith('Cost:')) return false;
+  if (text.startsWith('[thinking]')) return false;
+  if (text.startsWith('[raw]')) return false;
+  if (text.startsWith('Session started:')) return false;
+  if (text.startsWith('Session initialized')) return false;
+
+  // HIDE raw JSON tool parameters (common tool input fields)
+  const trimmed = text.trim();
+  if (trimmed.startsWith('{')) {
+    const toolParamKeys = [
+      '"file_path"',
+      '"command"',
+      '"pattern"',
+      '"path"',
+      '"content"',
+      '"old_string"',
+      '"new_string"',
+      '"query"',
+      '"url"',
+      '"prompt"',
+      '"notebook_path"',
+      '"description"',
+      '"offset"',
+      '"limit"',
+    ];
+    if (toolParamKeys.some((key) => trimmed.includes(key))) {
+      return false;
+    }
+  }
+
+  // SHOW everything else (Claude's text responses)
+  return true;
+}
+
+/**
+ * Helper to determine if output should be shown in chat view
+ */
+export function isChatViewOutput(text: string): boolean {
+  // HIDE all tool-related messages
+  if (text.startsWith('Using tool:')) return false;
+  if (text.startsWith('Tool input:')) return false;
+  if (text.startsWith('Tool result:')) return false;
+
+  // HIDE stats and system messages
+  if (text.startsWith('Tokens:')) return false;
+  if (text.startsWith('Cost:')) return false;
+  if (text.startsWith('[thinking]')) return false;
+  if (text.startsWith('[raw]')) return false;
+  if (text.startsWith('Session started:')) return false;
+  if (text.startsWith('Session initialized')) return false;
+
+  // HIDE raw JSON tool parameters
+  const trimmed = text.trim();
+  if (trimmed.startsWith('{')) {
+    const toolParamKeys = [
+      '"file_path"',
+      '"command"',
+      '"pattern"',
+      '"path"',
+      '"content"',
+      '"old_string"',
+      '"new_string"',
+      '"query"',
+      '"url"',
+      '"prompt"',
+      '"notebook_path"',
+      '"description"',
+      '"offset"',
+      '"limit"',
+    ];
+    if (toolParamKeys.some((key) => trimmed.includes(key))) {
+      return false;
+    }
+  }
+
+  // HIDE intermediate reasoning/planning messages
+  const intermediatePatterns = [
+    /^(let me|i'll|i will|now i|first,? i|i need to|i should|i'm going to)/i,
+    /^(looking at|reading|checking|searching|exploring|examining|investigating)/i,
+    /^(based on|from what|according to|it (looks|seems|appears))/i,
+    /^(this (shows|indicates|suggests|means|is))/i,
+    /^(the (code|file|function|class|component|implementation))/i,
+    /^(now (let|i))/i,
+  ];
+
+  if (intermediatePatterns.some((pattern) => pattern.test(trimmed))) {
+    return false;
+  }
+
+  return true;
+}
+
+export type ViewMode = 'simple' | 'chat' | 'advanced';
+
+interface UseFilteredOutputsOptions {
+  outputs: ClaudeOutput[];
+  viewMode: ViewMode;
+}
+
+/**
+ * Hook to filter and enrich outputs based on view mode
+ * - Advanced: show all outputs as-is
+ * - Chat: show only user messages and final responses
+ * - Simple: show tool names with key params, hide input/result details
+ */
+export function useFilteredOutputs({
+  outputs,
+  viewMode,
+}: UseFilteredOutputsOptions): EnrichedOutput[] {
+  return useMemo(() => {
+    if (viewMode === 'advanced') return outputs;
+
+    if (viewMode === 'chat') {
+      return outputs.filter((output) => {
+        if (output.isUserPrompt) return true;
+        return isChatViewOutput(output.text);
+      });
+    }
+
+    // Simple view: enrich tool lines with key parameters
+    const result: EnrichedOutput[] = [];
+    for (let i = 0; i < outputs.length; i++) {
+      const output = outputs[i];
+
+      if (output.isUserPrompt) {
+        result.push(output);
+        continue;
+      }
+
+      if (output.text.startsWith('Using tool:')) {
+        const toolName = output.text.replace('Using tool:', '').trim();
+
+        let keyParam: string | null = null;
+        let editData: EditData | undefined;
+
+        // Look ahead for tool input
+        for (let j = i + 1; j < outputs.length && j <= i + 3; j++) {
+          const nextOutput = outputs[j];
+          if (nextOutput.text.startsWith('Tool input:')) {
+            const inputJson = nextOutput.text.replace('Tool input:', '').trim();
+            keyParam = extractToolKeyParam(toolName, inputJson);
+            if (toolName === 'Edit') {
+              try {
+                const parsed = JSON.parse(inputJson);
+                if (parsed.old_string !== undefined || parsed.new_string !== undefined) {
+                  editData = { oldString: parsed.old_string || '', newString: parsed.new_string || '' };
+                }
+              } catch {
+                /* ignore parse errors */
+              }
+            }
+            break;
+          }
+          if (nextOutput.text.startsWith('Using tool:') || nextOutput.text.startsWith('Tool result:')) {
+            break;
+          }
+        }
+
+        if (toolName === 'Bash' && keyParam && keyParam.length > BASH_TRUNCATE_LENGTH) {
+          keyParam = keyParam.substring(0, BASH_TRUNCATE_LENGTH - 3) + '...';
+        }
+
+        result.push({
+          ...output,
+          _toolKeyParam: keyParam || undefined,
+          _editData: editData,
+        });
+        continue;
+      }
+
+      if (isSimpleViewOutput(output.text)) {
+        result.push(output);
+      }
+    }
+    return result;
+  }, [outputs, viewMode]);
+}

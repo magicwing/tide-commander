@@ -10,40 +10,30 @@ import type { StoreState, ClaudeOutput, LastPrompt } from './types';
 import { perf } from '../utils/profiling';
 
 /**
- * Generate a unique key for an output message for deduplication.
- * Uses text content (first 200 chars) + timestamp + type flags.
+ * Generate a hash for an output message.
+ * Uses full text content for accurate deduplication.
  */
-function getOutputKey(output: ClaudeOutput): string {
-  // Use first 200 chars of text to create key (handles streaming where text grows)
-  const textKey = output.text.slice(0, 200);
-  // Round timestamp to nearest 500ms to handle slight timing differences
-  const timeKey = Math.floor(output.timestamp / 500);
-  const typeKey = `${output.isUserPrompt ? 'u' : ''}${output.isDelegation ? 'd' : ''}`;
-  return `${timeKey}:${typeKey}:${textKey}`;
+function getOutputHash(text: string): string {
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) {
+    hash = ((hash << 5) - hash) + text.charCodeAt(i);
+    hash |= 0;
+  }
+  return (hash >>> 0).toString(16);
 }
 
 /**
- * Check if an output is a duplicate of any recent outputs.
- * Checks the last 10 outputs for duplicates.
+ * Check if an output is a duplicate of any existing outputs.
+ * Simply checks if the same text exists anywhere in recent outputs.
  */
 function isDuplicateOutput(output: ClaudeOutput, existingOutputs: ClaudeOutput[]): boolean {
-  // Only check last 10 outputs for performance
-  const recentOutputs = existingOutputs.slice(-10);
-  const newKey = getOutputKey(output);
+  const newHash = getOutputHash(output.text);
+
+  // Check last 50 outputs for duplicates
+  const recentOutputs = existingOutputs.slice(-50);
 
   for (const existing of recentOutputs) {
-    const existingKey = getOutputKey(existing);
-    if (existingKey === newKey) {
-      return true;
-    }
-
-    // Also check for exact text match within a 2-second window
-    if (
-      existing.text === output.text &&
-      Math.abs(existing.timestamp - output.timestamp) < 2000 &&
-      existing.isUserPrompt === output.isUserPrompt &&
-      existing.isDelegation === output.isDelegation
-    ) {
+    if (getOutputHash(existing.text) === newHash) {
       return true;
     }
   }
@@ -160,21 +150,16 @@ export function createOutputActions(
       preservedOutputs: ClaudeOutput[]
     ): ClaudeOutput[] {
       // Combine history (from server/file) with preserved outputs (from memory)
-      // History comes first (older), then preserved outputs (newer)
-      // Deduplicate by checking for duplicates
+      // Deduplicate by text hash
 
       const merged: ClaudeOutput[] = [];
-      const seenKeys = new Set<string>();
+      const seenHashes = new Set<string>();
 
       // Helper to add output if not duplicate
       const addIfNotDuplicate = (output: ClaudeOutput) => {
-        const key = getOutputKey(output);
-        // Also check exact text match
-        const exactKey = `exact:${output.text}:${output.isUserPrompt}:${output.isDelegation}`;
-
-        if (!seenKeys.has(key) && !seenKeys.has(exactKey)) {
-          seenKeys.add(key);
-          seenKeys.add(exactKey);
+        const hash = getOutputHash(output.text);
+        if (!seenHashes.has(hash)) {
+          seenHashes.add(hash);
           merged.push(output);
         }
       };

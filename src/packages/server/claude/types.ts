@@ -15,7 +15,8 @@ export interface StandardEvent {
     | 'error'
     | 'block_start'
     | 'block_end'
-    | 'context_stats';  // Response from /context command
+    | 'context_stats'   // Response from /context command
+    | 'usage_stats';    // Response from /usage command
   blockType?: 'text' | 'thinking';
   sessionId?: string;
   text?: string;
@@ -50,6 +51,7 @@ export interface StandardEvent {
     toolInput: Record<string, unknown>;
   }>;
   contextStatsRaw?: string;  // Raw /context command output for parsing
+  usageStatsRaw?: string;    // Raw /usage command output for parsing
 }
 
 // Custom agent definition for --agents flag

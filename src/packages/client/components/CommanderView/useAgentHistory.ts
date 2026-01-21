@@ -8,12 +8,25 @@
  *    that weren't persisted to the file yet (race condition fix)
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { Agent } from '../../../shared/types';
 import type { AgentHistory } from './types';
 import type { ClaudeOutput } from '../../store/types';
 import { MESSAGES_PER_PAGE } from './types';
 import { useReconnectCount, store } from '../../store';
+
+/**
+ * Compare two Maps for equality by checking if all keys and values are the same.
+ * For Agent values, we only compare the id to avoid re-renders on status changes.
+ */
+function agentMapKeysEqual(a: Map<string, Agent>, b: Map<string, Agent>): boolean {
+  if (a === b) return true;
+  if (a.size !== b.size) return false;
+  for (const key of a.keys()) {
+    if (!b.has(key)) return false;
+  }
+  return true;
+}
 
 interface UseAgentHistoryOptions {
   isOpen: boolean;
@@ -29,6 +42,23 @@ export function useAgentHistory({ isOpen, agents }: UseAgentHistoryOptions): Use
   const reconnectCount = useReconnectCount(); // Watch for reconnections to refresh history
   const [histories, setHistories] = useState<Map<string, AgentHistory>>(new Map());
   const loadingRef = useRef<Set<string>>(new Set());
+
+  // Track previous agents map to only reload when agents are added/removed, not updated
+  const prevAgentsRef = useRef<Map<string, Agent>>(agents);
+
+  // Only trigger effect when agent IDs change (not when agent status/outputs change)
+  const agentIds = useMemo(() => {
+    const ids = Array.from(agents.keys()).sort().join(',');
+    return ids;
+  }, [agents]);
+
+  // Also track which agents have sessionIds to reload when they get one
+  const agentSessionIds = useMemo(() => {
+    return Array.from(agents.values())
+      .map(a => `${a.id}:${a.sessionId || ''}`)
+      .sort()
+      .join(',');
+  }, [agents]);
 
   // Clear loading state when closing to allow refresh on reopen
   useEffect(() => {
@@ -107,23 +137,27 @@ export function useAgentHistory({ isOpen, agents }: UseAgentHistoryOptions): Use
         const data = await res.json();
         const historyMessages = (data.messages || []) as import('./types').HistoryMessage[];
 
-        // If we have preserved outputs, restore only the ones newer than history
-        // Don't merge history into outputs - they have different formats
-        // History is rendered by HistoryLine, outputs by OutputLine
-        if (preserved && preserved.length > 0) {
-          // Find the most recent history timestamp
-          const lastHistoryTimestamp = historyMessages.length > 0
-            ? Math.max(...historyMessages.map(m => m.timestamp ? new Date(m.timestamp).getTime() : 0))
-            : 0;
+        // Find the most recent history timestamp
+        const lastHistoryTimestamp = historyMessages.length > 0
+          ? Math.max(...historyMessages.map(m => m.timestamp ? new Date(m.timestamp).getTime() : 0))
+          : 0;
 
-          // Only keep outputs newer than history to avoid duplicates
-          const newerOutputs = preserved.filter(o => o.timestamp > lastHistoryTimestamp);
+        // Get current outputs from store
+        const currentOutputs = store.getOutputs(agent.id);
 
-          // Restore newer outputs
-          store.clearOutputs(agent.id);
-          for (const output of newerOutputs) {
-            store.addOutput(agent.id, output);
-          }
+        // Combine preserved outputs (if any) with current outputs
+        const allOutputs = preserved && preserved.length > 0
+          ? [...preserved, ...currentOutputs]
+          : currentOutputs;
+
+        // Only keep outputs newer than history to avoid duplicates
+        // This prevents showing the same content in both history and outputs
+        const newerOutputs = allOutputs.filter(o => o.timestamp > lastHistoryTimestamp);
+
+        // Clear and restore only newer outputs
+        store.clearOutputs(agent.id);
+        for (const output of newerOutputs) {
+          store.addOutput(agent.id, output);
         }
 
         setHistories(prev => {
@@ -170,12 +204,19 @@ export function useAgentHistory({ isOpen, agents }: UseAgentHistoryOptions): Use
         loadHistory(agent, preserved, historyLoadDelay);
       }
     }
-  }, [isOpen, agents, reconnectCount]); // reconnectCount triggers refresh on reconnection
+  }, [isOpen, agentIds, agentSessionIds, reconnectCount]); // Only reload when agent IDs or sessionIds change, not on every agent update
+
+  // Keep refs to avoid recreating callback on every agents/histories change
+  const agentsRef = useRef(agents);
+  const historiesRef = useRef(histories);
+  agentsRef.current = agents;
+  historiesRef.current = histories;
 
   // Load more history for a specific agent (pagination)
+  // Using refs to avoid recreating this callback when agents/histories change
   const loadMoreHistory = useCallback(async (agentId: string) => {
-    const agent = agents.get(agentId);
-    const currentHistory = histories.get(agentId);
+    const agent = agentsRef.current.get(agentId);
+    const currentHistory = historiesRef.current.get(agentId);
     if (!agent?.sessionId || !currentHistory || !currentHistory.hasMore) return;
 
     const currentOffset = currentHistory.messages.length;
@@ -203,7 +244,7 @@ export function useAgentHistory({ isOpen, agents }: UseAgentHistoryOptions): Use
     } catch (err) {
       console.error(`Failed to load more history for agent ${agentId}:`, err);
     }
-  }, [agents, histories]);
+  }, []); // No dependencies - uses refs
 
   return { histories, loadMoreHistory };
 }

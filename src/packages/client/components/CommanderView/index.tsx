@@ -13,8 +13,8 @@
  * via HistoryLine and OutputLine components from ../ClaudeOutputPanel/
  */
 
-import React, { useEffect, useRef, useState, useMemo } from 'react';
-import { useStore, store } from '../../store';
+import React, { useEffect, useRef, useState, useMemo, useCallback, memo } from 'react';
+import { useAgents, useAreas, useAgentOutputs, store } from '../../store';
 import type { Agent } from '../../../shared/types';
 import { FileExplorerPanel } from '../FileExplorerPanel';
 import { matchesShortcut } from '../../store/shortcuts';
@@ -23,7 +23,81 @@ import { useAgentHistory } from './useAgentHistory';
 import { AgentPanel } from './AgentPanel';
 import { SpawnForm } from './SpawnForm';
 import type { TabId, TabConfig } from './types';
+import type { AgentHistory } from './types';
 import { AGENTS_PER_PAGE, GRID_COLS } from './types';
+
+/**
+ * Wrapper component that isolates output updates to prevent parent re-renders.
+ * Each AgentPanelWrapper only re-renders when its own agent's outputs change.
+ *
+ * Uses agentId-based callbacks to allow parent to use stable callback references.
+ */
+interface AgentPanelWrapperProps {
+  agent: Agent;
+  history?: AgentHistory;
+  isExpanded: boolean;
+  isFocused: boolean;
+  advancedView: boolean;
+  index: number;
+  onExpand: (agentId: string) => void;
+  onCollapse: () => void;
+  onFocus: (index: number) => void;
+  onInputRef: (agentId: string, el: HTMLInputElement | HTMLTextAreaElement | null) => void;
+  onLoadMore: (agentId: string) => void;
+}
+
+const AgentPanelWrapper = memo(function AgentPanelWrapper({
+  agent,
+  history,
+  isExpanded,
+  isFocused,
+  advancedView,
+  index,
+  onExpand,
+  onCollapse,
+  onFocus,
+  onInputRef,
+  onLoadMore,
+}: AgentPanelWrapperProps) {
+  // Use the hook here so only this component re-renders when outputs change
+  const outputs = useAgentOutputs(agent.id);
+
+  // Create stable callbacks that include agentId
+  const handleExpand = useCallback(() => {
+    if (isExpanded) {
+      onCollapse();
+    } else {
+      onExpand(agent.id);
+    }
+  }, [agent.id, isExpanded, onExpand, onCollapse]);
+
+  const handleFocus = useCallback(() => {
+    onFocus(index);
+  }, [index, onFocus]);
+
+  const handleInputRef = useCallback((el: HTMLInputElement | HTMLTextAreaElement | null) => {
+    onInputRef(agent.id, el);
+  }, [agent.id, onInputRef]);
+
+  const handleLoadMore = useCallback(() => {
+    onLoadMore(agent.id);
+  }, [agent.id, onLoadMore]);
+
+  return (
+    <AgentPanel
+      agent={agent}
+      history={history}
+      outputs={outputs}
+      isExpanded={isExpanded}
+      isFocused={isFocused}
+      advancedView={advancedView}
+      onExpand={handleExpand}
+      onFocus={handleFocus}
+      inputRef={handleInputRef}
+      onLoadMore={handleLoadMore}
+    />
+  );
+});
 
 interface CommanderViewProps {
   isOpen: boolean;
@@ -31,7 +105,10 @@ interface CommanderViewProps {
 }
 
 export function CommanderView({ isOpen, onClose }: CommanderViewProps) {
-  const state = useStore();
+  // Use granular selectors to prevent re-renders from unrelated state changes
+  const agents = useAgents();
+  const areas = useAreas();
+
   const [activeTab, setActiveTab] = useState<TabId>(() => {
     return getStorageString(STORAGE_KEYS.COMMANDER_TAB, 'all');
   });
@@ -41,23 +118,14 @@ export function CommanderView({ isOpen, onClose }: CommanderViewProps) {
   const [showSpawnForm, setShowSpawnForm] = useState(false);
   const [fileExplorerAreaId, setFileExplorerAreaId] = useState<string | null>(null);
   const [advancedView, setAdvancedView] = useState(false);
-  const [, forceUpdate] = useState(0);
   const inputRefs = useRef<Map<string, HTMLInputElement | HTMLTextAreaElement>>(new Map());
   const visibleAgentsRef = useRef<Agent[]>([]);
 
   // Use the custom hook for history management
   const { histories, loadMoreHistory } = useAgentHistory({
     isOpen,
-    agents: state.agents,
+    agents,
   });
-
-  // Subscribe to store changes when opened (areas are loaded from server via WebSocket)
-  useEffect(() => {
-    if (!isOpen) return;
-    return store.subscribe(() => {
-      forceUpdate(n => n + 1);
-    });
-  }, [isOpen]);
 
   // Clear state when closing
   useEffect(() => {
@@ -70,7 +138,7 @@ export function CommanderView({ isOpen, onClose }: CommanderViewProps) {
 
   // Build tabs list: All, areas sorted alphabetically, Unassigned
   const tabs = useMemo((): TabConfig[] => {
-    const areasArray = Array.from(state.areas.values()).sort((a, b) =>
+    const areasArray = Array.from(areas.values()).sort((a, b) =>
       a.name.localeCompare(b.name)
     );
     const tabList: TabConfig[] = [{ id: 'all', name: 'All' }];
@@ -79,19 +147,19 @@ export function CommanderView({ isOpen, onClose }: CommanderViewProps) {
     }
     tabList.push({ id: 'unassigned', name: 'Unassigned' });
     return tabList;
-  }, [state.areas]);
+  }, [areas]);
 
   // Get current area for spawn
   const currentArea = useMemo(() => {
     if (activeTab === 'all' || activeTab === 'unassigned') return null;
-    return state.areas.get(activeTab) || null;
-  }, [activeTab, state.areas]);
+    return areas.get(activeTab) || null;
+  }, [activeTab, areas]);
 
   // Sort and filter agents by active tab
   // Bosses always appear first, then sorted by creation time
   const filteredAgents = useMemo(() => {
     const isBoss = (agent: Agent) => agent.isBoss === true || agent.class === 'boss';
-    const agents = Array.from(state.agents.values()).sort((a, b) => {
+    const sortedAgents = Array.from(agents.values()).sort((a, b) => {
       // Bosses first
       if (isBoss(a) && !isBoss(b)) return -1;
       if (!isBoss(a) && isBoss(b)) return 1;
@@ -99,22 +167,30 @@ export function CommanderView({ isOpen, onClose }: CommanderViewProps) {
       return (a.createdAt || 0) - (b.createdAt || 0);
     });
 
-    if (activeTab === 'all') return agents;
+    if (activeTab === 'all') return sortedAgents;
     if (activeTab === 'unassigned') {
-      return agents.filter(agent => !store.getAreaForAgent(agent.id));
+      return sortedAgents.filter(agent => !store.getAreaForAgent(agent.id));
     }
     // Filter by specific area
-    return agents.filter(agent => {
+    return sortedAgents.filter(agent => {
       const area = store.getAreaForAgent(agent.id);
       return area?.id === activeTab;
     });
-  }, [state.agents, activeTab]);
+  }, [agents, activeTab]);
 
   const totalPages = Math.ceil(filteredAgents.length / AGENTS_PER_PAGE);
   const visibleAgents = filteredAgents.slice(page * AGENTS_PER_PAGE, (page + 1) * AGENTS_PER_PAGE);
 
   // Keep ref in sync for focus effect (avoids re-focusing on terminal updates)
   visibleAgentsRef.current = visibleAgents;
+
+  // Stable callbacks for AgentPanelWrapper to prevent unnecessary re-renders
+  const handleCollapseExpanded = useCallback(() => setExpandedAgentId(null), []);
+  const handleExpandAgent = useCallback((agentId: string) => setExpandedAgentId(agentId), []);
+  const handleFocusAgent = useCallback((index: number) => setFocusedIndex(index), []);
+  const handleInputRef = useCallback((agentId: string, el: HTMLInputElement | HTMLTextAreaElement | null) => {
+    if (el) inputRefs.current.set(agentId, el);
+  }, []);
 
   // Reset page and save tab when switching tabs
   useEffect(() => {
@@ -271,7 +347,7 @@ export function CommanderView({ isOpen, onClose }: CommanderViewProps) {
         <div className="commander-tabs">
           {tabs.map(tab => {
             const area =
-              tab.id !== 'all' && tab.id !== 'unassigned' ? state.areas.get(tab.id) : null;
+              tab.id !== 'all' && tab.id !== 'unassigned' ? areas.get(tab.id) : null;
             const hasDirectories = area && area.directories && area.directories.length > 0;
 
             return (
@@ -294,11 +370,11 @@ export function CommanderView({ isOpen, onClose }: CommanderViewProps) {
                 <span>{tab.name}</span>
                 <span className="commander-tab-count">
                   {tab.id === 'all'
-                    ? state.agents.size
+                    ? agents.size
                     : tab.id === 'unassigned'
-                      ? Array.from(state.agents.values()).filter(a => !store.getAreaForAgent(a.id))
+                      ? Array.from(agents.values()).filter(a => !store.getAreaForAgent(a.id))
                           .length
-                      : Array.from(state.agents.values()).filter(
+                      : Array.from(agents.values()).filter(
                           a => store.getAreaForAgent(a.id)?.id === tab.id
                         ).length}
                 </span>
@@ -357,41 +433,40 @@ export function CommanderView({ isOpen, onClose }: CommanderViewProps) {
           ) : expandedAgentId ? (
             // Show only expanded agent
             (() => {
-              const agent = state.agents.get(expandedAgentId);
+              const agent = agents.get(expandedAgentId);
               if (!agent) return null;
               return (
-                <AgentPanel
+                <AgentPanelWrapper
                   key={agent.id}
                   agent={agent}
                   history={histories.get(agent.id)}
-                  outputs={store.getOutputs(agent.id)}
                   isExpanded={true}
                   isFocused={true}
                   advancedView={advancedView}
-                  onExpand={() => setExpandedAgentId(null)}
-                  inputRef={el => {
-                    if (el) inputRefs.current.set(agent.id, el);
-                  }}
-                  onLoadMore={() => loadMoreHistory(agent.id)}
+                  index={0}
+                  onExpand={handleExpandAgent}
+                  onCollapse={handleCollapseExpanded}
+                  onFocus={handleFocusAgent}
+                  onInputRef={handleInputRef}
+                  onLoadMore={loadMoreHistory}
                 />
               );
             })()
           ) : (
             visibleAgents.map((agent, index) => (
-              <AgentPanel
+              <AgentPanelWrapper
                 key={agent.id}
                 agent={agent}
                 history={histories.get(agent.id)}
-                outputs={store.getOutputs(agent.id)}
                 isExpanded={false}
                 isFocused={index === focusedIndex}
                 advancedView={advancedView}
-                onExpand={() => setExpandedAgentId(agent.id)}
-                onFocus={() => setFocusedIndex(index)}
-                inputRef={el => {
-                  if (el) inputRefs.current.set(agent.id, el);
-                }}
-                onLoadMore={() => loadMoreHistory(agent.id)}
+                index={index}
+                onExpand={handleExpandAgent}
+                onCollapse={handleCollapseExpanded}
+                onFocus={handleFocusAgent}
+                onInputRef={handleInputRef}
+                onLoadMore={loadMoreHistory}
               />
             ))
           )}

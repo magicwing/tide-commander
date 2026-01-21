@@ -154,7 +154,7 @@ export class ClaudeBackend implements CLIBackend {
   }
 
   private parseUserEvent(event: ClaudeRawEvent): StandardEvent | null {
-    // Check for local-command-stdout (from /context, /cost, etc. commands)
+    // Check for local-command-stdout (from /context, /cost, /usage etc. commands)
     const message = event.message as { content?: string };
     if (typeof message?.content === 'string' && message.content.includes('<local-command-stdout>')) {
       // Extract content between tags
@@ -167,6 +167,14 @@ export class ClaudeBackend implements CLIBackend {
           return {
             type: 'context_stats',
             contextStatsRaw: content,
+          };
+        }
+        // Check if this is /usage output
+        if (content.includes('## Usage') || content.includes('Current Session')) {
+          log.log(`parseUserEvent: Found /usage output`);
+          return {
+            type: 'usage_stats',
+            usageStatsRaw: content,
           };
         }
       }
@@ -194,28 +202,10 @@ export class ClaudeBackend implements CLIBackend {
   }
 
   private parseAssistantEvent(event: ClaudeRawEvent): StandardEvent | null {
-    if (!event.message?.content) return null;
-
-    // Process content blocks - return first meaningful one
-    for (const block of event.message.content) {
-      if (block.type === 'thinking' && block.text) {
-        return {
-          type: 'thinking',
-          text: block.text,
-        };
-      } else if (block.type === 'text' && block.text) {
-        return {
-          type: 'text',
-          text: block.text,
-        };
-      } else if (block.type === 'tool_use' && block.name) {
-        return {
-          type: 'tool_start',
-          toolName: block.name,
-          toolInput: block.input,
-        };
-      }
-    }
+    // NOTE: We return null for all assistant event content because:
+    // - 'text' and 'thinking' blocks are already sent via streaming deltas (stream_event)
+    // - 'tool_use' blocks are already handled by parseToolUseEvent (tool_use event with subtype: 'input')
+    // Returning anything here would cause duplicate messages.
     return null;
   }
 
@@ -480,6 +470,60 @@ export function parseContextOutput(content: string): import('../../shared/types.
     };
   } catch (error) {
     log.error('parseContextOutput error:', error);
+    return null;
+  }
+}
+
+/**
+ * Parse /usage command output from Claude Code CLI
+ *
+ * Expected format:
+ * ## Usage
+ *
+ * | Category | % | Reset |
+ * |---|---|---|
+ * | Current Session | 45.2% | Jan 25 at 5:00 PM |
+ * | Current Week (All Models) | 12.3% | Jan 27 at 12:00 AM |
+ * | Current Week (Sonnet Only) | 8.5% | Jan 27 at 12:00 AM |
+ */
+export function parseUsageOutput(content: string): {
+  session: { percentUsed: number; resetTime: string };
+  weeklyAllModels: { percentUsed: number; resetTime: string };
+  weeklySonnet: { percentUsed: number; resetTime: string };
+} | null {
+  try {
+    log.log('parseUsageOutput: Attempting to parse usage output');
+    log.log('parseUsageOutput content:', content.substring(0, 500));
+
+    // Parse a usage row: | Category Name | XX.X% | Reset Time |
+    const parseUsageRow = (categoryPattern: string): { percentUsed: number; resetTime: string } | null => {
+      const regex = new RegExp(`\\|\\s*${categoryPattern}\\s*\\|\\s*([\\d.]+)%\\s*\\|\\s*([^|]+)\\s*\\|`, 'i');
+      const match = content.match(regex);
+      if (match) {
+        return {
+          percentUsed: parseFloat(match[1]),
+          resetTime: match[2].trim(),
+        };
+      }
+      return null;
+    };
+
+    const session = parseUsageRow('Current Session');
+    const weeklyAllModels = parseUsageRow('Current Week \\(All Models\\)');
+    const weeklySonnet = parseUsageRow('Current Week \\(Sonnet Only\\)');
+
+    if (!session || !weeklyAllModels || !weeklySonnet) {
+      log.log('parseUsageOutput: Could not parse all usage categories');
+      log.log(`  session: ${session ? 'found' : 'missing'}`);
+      log.log(`  weeklyAllModels: ${weeklyAllModels ? 'found' : 'missing'}`);
+      log.log(`  weeklySonnet: ${weeklySonnet ? 'found' : 'missing'}`);
+      return null;
+    }
+
+    log.log('parseUsageOutput: Successfully parsed usage stats');
+    return { session, weeklyAllModels, weeklySonnet };
+  } catch (error) {
+    log.error('parseUsageOutput error:', error);
     return null;
   }
 }

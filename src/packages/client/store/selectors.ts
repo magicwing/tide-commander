@@ -15,6 +15,7 @@ import type {
   Skill,
   CustomAgentClass,
   AgentSupervisorHistoryEntry,
+  GlobalUsageStats,
 } from '../../shared/types';
 import type {
   StoreState,
@@ -641,4 +642,22 @@ export function useReconnectCount(): number {
   return useSelector(
     useCallback((state: StoreState) => state.reconnectCount, [])
   );
+}
+
+// ============================================================================
+// GLOBAL USAGE SELECTORS
+// ============================================================================
+
+/**
+ * Get global Claude API usage stats. Only re-renders when usage changes.
+ */
+export function useGlobalUsage(): GlobalUsageStats | null {
+  return useSelector(useCallback((state: StoreState) => state.supervisor.globalUsage, []));
+}
+
+/**
+ * Get whether usage is currently being refreshed.
+ */
+export function useRefreshingUsage(): boolean {
+  return useSelector(useCallback((state: StoreState) => state.supervisor.refreshingUsage, []));
 }

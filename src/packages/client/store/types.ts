@@ -17,6 +17,7 @@ import type {
   DelegationDecision,
   Skill,
   CustomAgentClass,
+  GlobalUsageStats,
 } from '../../shared/types';
 import type { ShortcutConfig } from './shortcuts';
 
@@ -88,6 +89,10 @@ export interface SupervisorState {
   historyFetchedForAgents: Set<string>;
   // Track if a report is being generated
   generatingReport: boolean;
+  // Global Claude API usage stats (from /usage command)
+  globalUsage: GlobalUsageStats | null;
+  // Track if usage refresh is in progress
+  refreshingUsage: boolean;
 }
 
 // Store state

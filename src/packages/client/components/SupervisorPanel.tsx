@@ -1,6 +1,6 @@
 import React from 'react';
-import { useStore, store } from '../store';
-import type { AgentAnalysis, SupervisorReport } from '../../shared/types';
+import { useStore, store, useGlobalUsage, useRefreshingUsage } from '../store';
+import type { AgentAnalysis, SupervisorReport, GlobalUsageStats } from '../../shared/types';
 
 interface SupervisorPanelProps {
   isOpen: boolean;
@@ -19,6 +19,8 @@ function formatTimeAgo(timestamp: number): string {
 export function SupervisorPanel({ isOpen, onClose }: SupervisorPanelProps) {
   const state = useStore();
   const { lastReport, enabled, lastReportTime, generatingReport, autoReportOnComplete } = state.supervisor;
+  const globalUsage = useGlobalUsage();
+  const refreshingUsage = useRefreshingUsage();
 
   const handleRefresh = () => {
     store.requestSupervisorReport();
@@ -30,6 +32,10 @@ export function SupervisorPanel({ isOpen, onClose }: SupervisorPanelProps) {
 
   const handleAutoReportToggle = () => {
     store.setSupervisorConfig({ autoReportOnComplete: !autoReportOnComplete });
+  };
+
+  const handleUsageRefresh = () => {
+    store.requestGlobalUsage();
   };
 
   if (!isOpen) return null;
@@ -51,11 +57,11 @@ export function SupervisorPanel({ isOpen, onClose }: SupervisorPanelProps) {
               {enabled ? '● Active' : '○ Paused'}
             </button>
             <button
-              className={`supervisor-toggle auto-report ${autoReportOnComplete !== false ? 'active' : ''}`}
+              className={`supervisor-toggle auto-report ${autoReportOnComplete ? 'active' : ''}`}
               onClick={handleAutoReportToggle}
-              title={autoReportOnComplete !== false ? 'Disable auto-report on task complete' : 'Enable auto-report on task complete'}
+              title={autoReportOnComplete ? 'Disable auto-report on task complete' : 'Enable auto-report on task complete'}
             >
-              {autoReportOnComplete !== false ? '⚡ Auto' : '◇ Manual'}
+              {autoReportOnComplete ? '⚡ Auto' : '◇ Manual'}
             </button>
             <button
               className="supervisor-refresh"
@@ -69,6 +75,13 @@ export function SupervisorPanel({ isOpen, onClose }: SupervisorPanelProps) {
             </button>
           </div>
         </div>
+
+        {/* Global Usage Section */}
+        <GlobalUsageSection
+          usage={globalUsage}
+          refreshing={refreshingUsage}
+          onRefresh={handleUsageRefresh}
+        />
 
         {generatingReport ? (
           <div className="supervisor-loading">
@@ -88,8 +101,8 @@ export function SupervisorPanel({ isOpen, onClose }: SupervisorPanelProps) {
 
         <div className="supervisor-footer">
           {lastReportTime && <span>Last report: {formatTimeAgo(lastReportTime)}</span>}
-          {enabled && autoReportOnComplete !== false && <span>Auto-updates on task complete</span>}
-          {enabled && autoReportOnComplete === false && <span>Manual updates only</span>}
+          {enabled && autoReportOnComplete && <span>Auto-updates on task complete</span>}
+          {enabled && !autoReportOnComplete && <span>Manual updates only</span>}
         </div>
       </div>
     </div>
@@ -185,6 +198,92 @@ function AgentSummaryCard({ agent }: { agent: AgentAnalysis }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+interface GlobalUsageSectionProps {
+  usage: GlobalUsageStats | null;
+  refreshing: boolean;
+  onRefresh: () => void;
+}
+
+function getUsageColor(percent: number): string {
+  if (percent < 50) return '#4aff9e';
+  if (percent < 75) return '#ff9e4a';
+  return '#ff4a4a';
+}
+
+function GlobalUsageSection({ usage, refreshing, onRefresh }: GlobalUsageSectionProps) {
+  return (
+    <div className="supervisor-section usage-section">
+      <div className="usage-header">
+        <h3>Claude API Usage</h3>
+        <button
+          className="usage-refresh-btn"
+          onClick={onRefresh}
+          disabled={refreshing}
+          title="Refresh usage stats"
+        >
+          {refreshing ? '...' : '↻'}
+        </button>
+      </div>
+      {usage ? (
+        <div className="usage-grid">
+          <UsageBar
+            label="Session"
+            percent={usage.session.percentUsed}
+            resetTime={usage.session.resetTime}
+          />
+          <UsageBar
+            label="Weekly (All)"
+            percent={usage.weeklyAllModels.percentUsed}
+            resetTime={usage.weeklyAllModels.resetTime}
+          />
+          <UsageBar
+            label="Weekly (Sonnet)"
+            percent={usage.weeklySonnet.percentUsed}
+            resetTime={usage.weeklySonnet.resetTime}
+          />
+          <div className="usage-source">
+            via {usage.sourceAgentName} · {formatTimeAgo(usage.lastUpdated)}
+          </div>
+        </div>
+      ) : (
+        <div className="usage-empty">
+          <p>No usage data yet</p>
+          <button onClick={onRefresh} disabled={refreshing}>
+            {refreshing ? 'Fetching...' : 'Fetch Usage'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface UsageBarProps {
+  label: string;
+  percent: number;
+  resetTime: string;
+}
+
+function UsageBar({ label, percent, resetTime }: UsageBarProps) {
+  const color = getUsageColor(percent);
+  const displayPercent = Math.min(percent, 100);
+
+  return (
+    <div className="usage-bar-container">
+      <div className="usage-bar-label">
+        <span>{label}</span>
+        <span className="usage-percent" style={{ color }}>{percent.toFixed(1)}%</span>
+      </div>
+      <div className="usage-bar-track">
+        <div
+          className="usage-bar-fill"
+          style={{ width: `${displayPercent}%`, backgroundColor: color }}
+        />
+      </div>
+      <div className="usage-bar-reset">Resets {resetTime}</div>
     </div>
   );
 }

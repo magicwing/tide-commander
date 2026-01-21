@@ -91,6 +91,8 @@ export {
   useCustomAgentClassesArray,
   useCustomAgentClass,
   useReconnectCount,
+  useGlobalUsage,
+  useRefreshingUsage,
 } from './selectors';
 
 // ============================================================================
@@ -148,7 +150,7 @@ class Store
       contextModalAgentId: null,
       supervisor: {
         enabled: true,
-        autoReportOnComplete: true,
+        autoReportOnComplete: false,
         lastReport: null,
         narratives: new Map(),
         lastReportTime: null,
@@ -157,6 +159,8 @@ class Store
         loadingHistoryForAgent: null,
         historyFetchedForAgents: new Set(),
         generatingReport: false,
+        globalUsage: null,
+        refreshingUsage: false,
       },
       permissionRequests: new Map(),
       delegationHistories: new Map(),
@@ -435,6 +439,9 @@ class Store
   addAgentAnalysis(...args: Parameters<SupervisorActions['addAgentAnalysis']>) { return this.supervisorActions.addAgentAnalysis(...args); }
   isLoadingHistoryForAgent(...args: Parameters<SupervisorActions['isLoadingHistoryForAgent']>) { return this.supervisorActions.isLoadingHistoryForAgent(...args); }
   hasHistoryBeenFetched(...args: Parameters<SupervisorActions['hasHistoryBeenFetched']>) { return this.supervisorActions.hasHistoryBeenFetched(...args); }
+  setGlobalUsage(...args: Parameters<SupervisorActions['setGlobalUsage']>) { return this.supervisorActions.setGlobalUsage(...args); }
+  requestGlobalUsage() { return this.supervisorActions.requestGlobalUsage(); }
+  getGlobalUsage() { return this.supervisorActions.getGlobalUsage(); }
 
   // ============================================================================
   // Area Actions (delegated)

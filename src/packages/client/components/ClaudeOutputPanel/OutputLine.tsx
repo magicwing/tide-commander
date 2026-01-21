@@ -21,6 +21,19 @@ interface OutputLineProps {
   onFileClick?: (path: string, editData?: EditData) => void;
 }
 
+// Generate a short debug hash for an output (for debugging duplicates)
+function getDebugHash(output: ClaudeOutput): string {
+  const textKey = output.text.slice(0, 50);
+  const flags = `${output.isUserPrompt ? 'U' : ''}${output.isStreaming ? 'S' : 'F'}${output.isDelegation ? 'D' : ''}`;
+  // Simple hash from text
+  let hash = 0;
+  for (let i = 0; i < textKey.length; i++) {
+    hash = ((hash << 5) - hash) + textKey.charCodeAt(i);
+    hash |= 0;
+  }
+  return `${flags}:${(hash >>> 0).toString(16).slice(0, 6)}`;
+}
+
 export const OutputLine = memo(function OutputLine({ output, agentId, onImageClick, onFileClick }: OutputLineProps) {
   const hideCost = useHideCost();
   const { text: rawText, isStreaming, isUserPrompt, timestamp, _toolKeyParam, _editData } = output;
@@ -28,6 +41,9 @@ export const OutputLine = memo(function OutputLine({ output, agentId, onImageCli
 
   // Format timestamp for display
   const timeStr = formatTimestamp(timestamp || Date.now());
+
+  // Debug hash for identifying duplicates
+  const debugHash = getDebugHash(output);
 
   // Check if this agent has a pending delegated task
   const delegation = agentId ? store.getLastDelegationReceived(agentId) : null;
@@ -47,7 +63,7 @@ export const OutputLine = memo(function OutputLine({ output, agentId, onImageCli
 
     return (
       <div className="output-line output-user">
-        <span className="output-timestamp">{timeStr}</span>
+        <span className="output-timestamp" title={`${timestamp} | ${debugHash}`}>{timeStr} <span style={{fontSize: '9px', color: '#666', fontFamily: 'monospace'}}>[{debugHash}]</span></span>
         {isDelegatedTask ? (
           <DelegatedTaskHeader bossName={delegation.bossName} taskCommand={delegation.taskCommand} />
         ) : (
@@ -86,7 +102,7 @@ export const OutputLine = memo(function OutputLine({ output, agentId, onImageCli
 
     return (
       <div className={`output-line output-tool-use ${isStreaming ? 'output-streaming' : ''}`}>
-        <span className="output-timestamp">{timeStr}</span>
+        <span className="output-timestamp" title={`${timestamp} | ${debugHash}`}>{timeStr} <span style={{fontSize: '9px', color: '#666', fontFamily: 'monospace'}}>[{debugHash}]</span></span>
         <span className="output-tool-icon">{icon}</span>
         <span className="output-tool-name">{toolName}</span>
         {_toolKeyParam && (
@@ -114,7 +130,7 @@ export const OutputLine = memo(function OutputLine({ output, agentId, onImageCli
       if (parsed.file_path && (parsed.old_string !== undefined || parsed.new_string !== undefined)) {
         return (
           <div className="output-line output-tool-input">
-            <span className="output-timestamp">{timeStr}</span>
+            <span className="output-timestamp" title={`${timestamp} | ${debugHash}`}>{timeStr} <span style={{fontSize: '9px', color: '#666', fontFamily: 'monospace'}}>[{debugHash}]</span></span>
             <EditToolDiff content={inputText} onFileClick={onFileClick} />
           </div>
         );
@@ -122,7 +138,7 @@ export const OutputLine = memo(function OutputLine({ output, agentId, onImageCli
       if (parsed.file_path && parsed.old_string === undefined && parsed.new_string === undefined) {
         return (
           <div className="output-line output-tool-input">
-            <span className="output-timestamp">{timeStr}</span>
+            <span className="output-timestamp" title={`${timestamp} | ${debugHash}`}>{timeStr} <span style={{fontSize: '9px', color: '#666', fontFamily: 'monospace'}}>[{debugHash}]</span></span>
             <ReadToolInput content={inputText} onFileClick={onFileClick} />
           </div>
         );
@@ -130,7 +146,7 @@ export const OutputLine = memo(function OutputLine({ output, agentId, onImageCli
       if (Array.isArray(parsed.todos)) {
         return (
           <div className="output-line output-tool-input">
-            <span className="output-timestamp">{timeStr}</span>
+            <span className="output-timestamp" title={`${timestamp} | ${debugHash}`}>{timeStr} <span style={{fontSize: '9px', color: '#666', fontFamily: 'monospace'}}>[{debugHash}]</span></span>
             <TodoWriteInput content={inputText} />
           </div>
         );
@@ -141,7 +157,7 @@ export const OutputLine = memo(function OutputLine({ output, agentId, onImageCli
 
     return (
       <div className="output-line output-tool-input">
-        <span className="output-timestamp">{timeStr}</span>
+        <span className="output-timestamp" title={`${timestamp} | ${debugHash}`}>{timeStr} <span style={{fontSize: '9px', color: '#666', fontFamily: 'monospace'}}>[{debugHash}]</span></span>
         <pre className="output-input-content">{inputText}</pre>
       </div>
     );
@@ -153,7 +169,7 @@ export const OutputLine = memo(function OutputLine({ output, agentId, onImageCli
     const isError = resultText.toLowerCase().includes('error') || resultText.toLowerCase().includes('failed');
     return (
       <div className={`output-line output-tool-result ${isError ? 'is-error' : ''}`}>
-        <span className="output-timestamp">{timeStr}</span>
+        <span className="output-timestamp" title={`${timestamp} | ${debugHash}`}>{timeStr} <span style={{fontSize: '9px', color: '#666', fontFamily: 'monospace'}}>[{debugHash}]</span></span>
         <span className="output-result-icon">{isError ? '❌' : '✓'}</span>
         <pre className="output-result-content">{resultText}</pre>
       </div>
@@ -209,7 +225,7 @@ export const OutputLine = memo(function OutputLine({ output, agentId, onImageCli
         onClick={handleContextClick}
         title={agentId ? 'Click to view detailed context stats' : undefined}
       >
-        <span className="output-timestamp">{timeStr}</span>
+        <span className="output-timestamp" title={`${timestamp} | ${debugHash}`}>{timeStr} <span style={{fontSize: '9px', color: '#666', fontFamily: 'monospace'}}>[{debugHash}]</span></span>
         <span style={{ color: '#bd93f9', fontSize: '12px' }}>📊</span>
         <span style={{ fontSize: '11px', color: '#6272a4' }}>Context:</span>
         <div
@@ -284,7 +300,7 @@ export const OutputLine = memo(function OutputLine({ output, agentId, onImageCli
     if (parsed.hasDelegation && parsed.delegations.length > 0) {
       return (
         <div className={className}>
-          <span className="output-timestamp">{timeStr}</span>
+          <span className="output-timestamp" title={`${timestamp} | ${debugHash}`}>{timeStr} <span style={{fontSize: '9px', color: '#666', fontFamily: 'monospace'}}>[{debugHash}]</span></span>
           <span className="output-role">Claude</span>
           <div className="markdown-content">
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
@@ -301,7 +317,7 @@ export const OutputLine = memo(function OutputLine({ output, agentId, onImageCli
 
   return (
     <div className={className}>
-      <span className="output-timestamp">{timeStr}</span>
+      <span className="output-timestamp" title={`${timestamp} | ${debugHash}`}>{timeStr} <span style={{fontSize: '9px', color: '#666', fontFamily: 'monospace'}}>[{debugHash}]</span></span>
       {isClaudeMessage && <span className="output-role">Claude</span>}
       {useMarkdown ? (
         <div className="markdown-content">

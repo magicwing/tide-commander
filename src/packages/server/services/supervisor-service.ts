@@ -41,7 +41,7 @@ let config: SupervisorConfig = {
   enabled: true,
   intervalMs: 60000, // Not used for timer anymore, kept for compatibility
   maxNarrativesPerAgent: 20,
-  autoReportOnComplete: true, // Generate report when agent completes task
+  autoReportOnComplete: false, // Generate report when agent completes task (disabled by default)
 };
 
 // Debounce for report generation (avoid generating too many reports in quick succession)
@@ -179,7 +179,7 @@ function scheduleAgentReportGeneration(agentId: string): void {
     return;
   }
 
-  if (config.autoReportOnComplete === false) {
+  if (!config.autoReportOnComplete) {
     log.log(' Auto-report on complete disabled, skipping scheduled agent report');
     return;
   }
@@ -719,10 +719,91 @@ export function getStatus(): {
 } {
   return {
     enabled: config.enabled,
-    autoReportOnComplete: config.autoReportOnComplete !== false,
+    autoReportOnComplete: config.autoReportOnComplete === true,
     lastReportTime: latestReport?.timestamp || null,
     // Reports are now event-driven (on task start/complete), not scheduled
     nextReportTime: null,
   };
+}
+
+// ============================================================================
+// Global Usage Tracking
+// ============================================================================
+
+import type { GlobalUsageStats } from '../../shared/types.js';
+
+// Global usage stats (shared across all sessions since they use same API key)
+let globalUsage: GlobalUsageStats | null = null;
+
+/**
+ * Update global usage stats from a /usage command response
+ */
+export function updateGlobalUsage(
+  agentId: string,
+  agentName: string,
+  usageData: {
+    session: { percentUsed: number; resetTime: string };
+    weeklyAllModels: { percentUsed: number; resetTime: string };
+    weeklySonnet: { percentUsed: number; resetTime: string };
+  }
+): void {
+  globalUsage = {
+    session: usageData.session,
+    weeklyAllModels: usageData.weeklyAllModels,
+    weeklySonnet: usageData.weeklySonnet,
+    sourceAgentId: agentId,
+    sourceAgentName: agentName,
+    lastUpdated: Date.now(),
+  };
+
+  log.log(`✓ Updated global usage stats from ${agentName}:`);
+  log.log(`  Session: ${usageData.session.percentUsed}% (resets ${usageData.session.resetTime})`);
+  log.log(`  Weekly All: ${usageData.weeklyAllModels.percentUsed}% (resets ${usageData.weeklyAllModels.resetTime})`);
+  log.log(`  Weekly Sonnet: ${usageData.weeklySonnet.percentUsed}% (resets ${usageData.weeklySonnet.resetTime})`);
+
+  // Emit event for real-time updates
+  emit('global_usage', globalUsage);
+}
+
+/**
+ * Get current global usage stats
+ */
+export function getGlobalUsage(): GlobalUsageStats | null {
+  return globalUsage;
+}
+
+/**
+ * Request a usage refresh from any idle agent
+ * Returns the agent ID that will provide the data, or null if no agent is available
+ */
+export async function requestUsageRefresh(): Promise<string | null> {
+  console.log('[Supervisor] requestUsageRefresh called');
+  const agents = agentService.getAllAgents();
+  console.log('[Supervisor] All agents:', agents.map(a => ({ name: a.name, status: a.status, sessionId: a.sessionId })));
+
+  // Find an idle agent with a session
+  const idleAgent = agents.find(a => a.status === 'idle' && a.sessionId);
+  console.log('[Supervisor] Idle agent found:', idleAgent ? idleAgent.name : 'none');
+
+  if (!idleAgent) {
+    log.log('No idle agent available for usage refresh');
+    return null;
+  }
+
+  log.log(`Requesting usage refresh from ${idleAgent.name}`);
+
+  // Import dynamically to avoid circular dependency
+  const { sendSilentCommand } = await import('./claude-service.js');
+
+  try {
+    console.log('[Supervisor] Sending /usage command to', idleAgent.name);
+    await sendSilentCommand(idleAgent.id, '/usage');
+    console.log('[Supervisor] /usage command sent successfully');
+    return idleAgent.id;
+  } catch (err) {
+    console.error('[Supervisor] Failed to send /usage command:', err);
+    log.error(`Failed to request usage from ${idleAgent.name}:`, err);
+    return null;
+  }
 }
 

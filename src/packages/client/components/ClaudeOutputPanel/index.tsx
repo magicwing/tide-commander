@@ -58,7 +58,7 @@ import {
 } from './types';
 import type { HistoryMessage, AttachedFile, EditData } from './types';
 import { markdownComponents } from './MarkdownComponents';
-import { isSimpleViewOutput, isChatViewOutput } from './viewFilters';
+import { useFilteredOutputs } from '../shared/useFilteredOutputs';
 import { HistoryLine } from './HistoryLine';
 import { OutputLine } from './OutputLine';
 import { GuakeAgentLink } from './GuakeAgentLink';
@@ -195,72 +195,28 @@ export function ClaudeOutputPanel() {
     return history.filter((msg) => msg.type === 'user' || msg.type === 'assistant' || msg.type === 'tool_use');
   }, [history, viewMode]);
 
-  // Memoized filtered outputs based on view mode
+  // Memoized filtered outputs based on view mode (using shared hook)
+  const viewFilteredOutputs = useFilteredOutputs({ outputs, viewMode });
+
+  // Deduplicate outputs against history to prevent showing same content twice
+  // This handles the case where outputs arrive AFTER history is loaded
   const filteredOutputs = useMemo(() => {
-    if (viewMode === 'advanced') return outputs;
+    if (!history.length) return viewFilteredOutputs;
 
-    if (viewMode === 'chat') {
-      return outputs.filter((output) => {
-        if (output.isUserPrompt) return true;
-        return isChatViewOutput(output.text);
-      });
+    // Create a Set of content hashes from history messages for fast lookup
+    const historyContentHashes = new Set<string>();
+    for (const msg of history) {
+      // Use first 200 chars of content as hash key (same as server-side dedup)
+      const contentKey = msg.content.slice(0, 200);
+      historyContentHashes.add(contentKey);
     }
 
-    // Simple view: enrich tool lines with key parameters
-    const result: (ClaudeOutput & { _toolKeyParam?: string; _editData?: EditData })[] = [];
-    for (let i = 0; i < outputs.length; i++) {
-      const output = outputs[i];
-
-      if (output.isUserPrompt) {
-        result.push(output);
-        continue;
-      }
-
-      if (output.text.startsWith('Using tool:')) {
-        const toolName = output.text.replace('Using tool:', '').trim();
-
-        let keyParam: string | null = null;
-        let editData: EditData | undefined;
-        for (let j = i + 1; j < outputs.length && j <= i + 3; j++) {
-          const nextOutput = outputs[j];
-          if (nextOutput.text.startsWith('Tool input:')) {
-            const inputJson = nextOutput.text.replace('Tool input:', '').trim();
-            keyParam = extractToolKeyParam(toolName, inputJson);
-            if (toolName === 'Edit') {
-              try {
-                const parsed = JSON.parse(inputJson);
-                if (parsed.old_string !== undefined || parsed.new_string !== undefined) {
-                  editData = { oldString: parsed.old_string || '', newString: parsed.new_string || '' };
-                }
-              } catch {
-                /* ignore parse errors */
-              }
-            }
-            break;
-          }
-          if (nextOutput.text.startsWith('Using tool:') || nextOutput.text.startsWith('Tool result:')) {
-            break;
-          }
-        }
-
-        if (toolName === 'Bash' && keyParam && keyParam.length > BASH_TRUNCATE_LENGTH) {
-          keyParam = keyParam.substring(0, BASH_TRUNCATE_LENGTH - 3) + '...';
-        }
-
-        result.push({
-          ...output,
-          _toolKeyParam: keyParam || undefined,
-          _editData: editData,
-        });
-        continue;
-      }
-
-      if (isSimpleViewOutput(output.text)) {
-        result.push(output);
-      }
-    }
-    return result;
-  }, [outputs, viewMode]);
+    // Filter out outputs whose content already exists in history
+    return viewFilteredOutputs.filter(output => {
+      const outputContentKey = output.text.slice(0, 200);
+      return !historyContentHashes.has(outputContentKey);
+    });
+  }, [viewFilteredOutputs, history]);
 
   // Handle resize drag
   const handleResizeStart = useCallback(
@@ -491,20 +447,19 @@ export function ClaudeOutputPanel() {
           for (const output of newerOutputs) {
             store.addOutput(selectedAgentId, output);
           }
-        } else {
-          // Normal flow - handle outputs based on agent status
-          const currentAgent = agents.get(selectedAgentId);
-          const isAgentWorking = currentAgent?.status === 'working';
-          if (messages.length > 0 && !isAgentWorking) {
-            const currentOutputs = store.getOutputs(selectedAgentId);
-            const thirtySecondsAgo = Date.now() - 30000;
-            const preservedOutputs = currentOutputs.filter(
-              (o) => o.isDelegation || o.isStreaming || (o.timestamp && o.timestamp > thirtySecondsAgo)
-            );
-            store.clearOutputs(selectedAgentId);
-            for (const output of preservedOutputs) {
-              store.addOutput(selectedAgentId, output);
-            }
+        } else if (messages.length > 0) {
+          // Normal flow - filter outputs to only keep those newer than history
+          // This prevents duplicates between history and live outputs
+          const lastHistoryTimestamp = Math.max(
+            ...messages.map((m: HistoryMessage) => m.timestamp ? new Date(m.timestamp).getTime() : 0)
+          );
+
+          const currentOutputs = store.getOutputs(selectedAgentId);
+          const newerOutputs = currentOutputs.filter(o => o.timestamp > lastHistoryTimestamp);
+
+          store.clearOutputs(selectedAgentId);
+          for (const output of newerOutputs) {
+            store.addOutput(selectedAgentId, output);
           }
         }
 
@@ -577,7 +532,9 @@ export function ClaudeOutputPanel() {
     if (!outputRef.current) return;
 
     const { scrollTop, scrollHeight, clientHeight } = outputRef.current;
-    const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
+    // Use a larger threshold (150px) to better detect if user has scrolled up
+    // This prevents auto-scroll from fighting with user's scroll position during streaming
+    const isAtBottom = scrollHeight - scrollTop - clientHeight < 150;
     isUserScrolledUpRef.current = !isAtBottom;
 
     if (!loadingMore && hasMore && !searchMode && scrollTop < SCROLL_THRESHOLD) {
@@ -649,14 +606,18 @@ export function ClaudeOutputPanel() {
     textarea.style.height = `${newHeight}px`;
   }, [command, useTextarea]);
 
-  // Auto-scroll to bottom on new output
+  // Auto-scroll to bottom on new output (only if user is at bottom)
   useEffect(() => {
-    if (isUserScrolledUpRef.current) return;
-
     let rafId: number;
     rafId = requestAnimationFrame(() => {
-      if (outputRef.current && !isUserScrolledUpRef.current) {
-        outputRef.current.scrollTop = outputRef.current.scrollHeight;
+      if (outputRef.current) {
+        const { scrollTop, scrollHeight, clientHeight } = outputRef.current;
+        const isAtBottom = scrollHeight - scrollTop - clientHeight < 150;
+
+        // Only auto-scroll if user is at (or near) bottom
+        if (isAtBottom) {
+          outputRef.current.scrollTop = scrollHeight;
+        }
       }
     });
 

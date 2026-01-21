@@ -22,6 +22,19 @@ interface HistoryLineProps {
   onFileClick?: (path: string, editData?: EditData) => void;
 }
 
+// Generate a short debug hash for a history message (for debugging duplicates)
+function getHistoryDebugHash(message: HistoryMessage): string {
+  const textKey = message.content.slice(0, 50);
+  const flags = `H${message.type[0].toUpperCase()}`; // H for History, then type initial
+  // Simple hash from text
+  let hash = 0;
+  for (let i = 0; i < textKey.length; i++) {
+    hash = ((hash << 5) - hash) + textKey.charCodeAt(i);
+    hash |= 0;
+  }
+  return `${flags}:${(hash >>> 0).toString(16).slice(0, 6)}`;
+}
+
 export const HistoryLine = memo(function HistoryLine({
   message,
   agentId,
@@ -36,6 +49,10 @@ export const HistoryLine = memo(function HistoryLine({
 
   // Format timestamp for display (HistoryMessage has ISO string timestamp)
   const timeStr = timestamp ? formatTimestamp(new Date(timestamp).getTime()) : '';
+  const timestampMs = timestamp ? new Date(timestamp).getTime() : 0;
+
+  // Debug hash for identifying duplicates
+  const debugHash = getHistoryDebugHash(message);
 
   // Hide utility slash commands like /context, /cost, /compact
   if (type === 'user') {
@@ -102,7 +119,7 @@ export const HistoryLine = memo(function HistoryLine({
         onClick={handleContextClick}
         title={agentId ? 'Click to view detailed context stats' : undefined}
       >
-        {timeStr && <span className="output-timestamp">{timeStr}</span>}
+        {timeStr && <span className="output-timestamp" title={`${timestampMs} | ${debugHash}`}>{timeStr} <span style={{fontSize: '9px', color: '#888', fontFamily: 'monospace'}}>[{debugHash}]</span></span>}
         <span style={{ color: '#bd93f9', fontSize: '12px' }}>📊</span>
         <span style={{ fontSize: '11px', color: '#6272a4' }}>Context:</span>
         <div
@@ -183,7 +200,7 @@ export const HistoryLine = memo(function HistoryLine({
 
       return (
         <div className="output-line output-tool-use output-tool-simple">
-          {timeStr && <span className="output-timestamp">{timeStr}</span>}
+          {timeStr && <span className="output-timestamp" title={`${timestampMs} | ${debugHash}`}>{timeStr} <span style={{fontSize: '9px', color: '#888', fontFamily: 'monospace'}}>[{debugHash}]</span></span>}
           <span className="output-tool-icon">{icon}</span>
           <span className="output-tool-name">{toolName}</span>
           {keyParam && (
@@ -205,7 +222,7 @@ export const HistoryLine = memo(function HistoryLine({
       return (
         <>
           <div className="output-line output-tool-use">
-            {timeStr && <span className="output-timestamp">{timeStr}</span>}
+            {timeStr && <span className="output-timestamp" title={`${timestampMs} | ${debugHash}`}>{timeStr} <span style={{fontSize: '9px', color: '#888', fontFamily: 'monospace'}}>[{debugHash}]</span></span>}
             <span className="output-tool-icon">{icon}</span>
             <span className="output-tool-name">{toolName}</span>
           </div>
@@ -221,7 +238,7 @@ export const HistoryLine = memo(function HistoryLine({
       return (
         <>
           <div className="output-line output-tool-use">
-            {timeStr && <span className="output-timestamp">{timeStr}</span>}
+            {timeStr && <span className="output-timestamp" title={`${timestampMs} | ${debugHash}`}>{timeStr} <span style={{fontSize: '9px', color: '#888', fontFamily: 'monospace'}}>[{debugHash}]</span></span>}
             <span className="output-tool-icon">{icon}</span>
             <span className="output-tool-name">{toolName}</span>
           </div>
@@ -237,7 +254,7 @@ export const HistoryLine = memo(function HistoryLine({
       return (
         <>
           <div className="output-line output-tool-use">
-            {timeStr && <span className="output-timestamp">{timeStr}</span>}
+            {timeStr && <span className="output-timestamp" title={`${timestampMs} | ${debugHash}`}>{timeStr} <span style={{fontSize: '9px', color: '#888', fontFamily: 'monospace'}}>[{debugHash}]</span></span>}
             <span className="output-tool-icon">{icon}</span>
             <span className="output-tool-name">{toolName}</span>
           </div>
@@ -252,7 +269,7 @@ export const HistoryLine = memo(function HistoryLine({
     return (
       <>
         <div className="output-line output-tool-use">
-          {timeStr && <span className="output-timestamp">{timeStr}</span>}
+          {timeStr && <span className="output-timestamp" title={`${timestampMs} | ${debugHash}`}>{timeStr} <span style={{fontSize: '9px', color: '#888', fontFamily: 'monospace'}}>[{debugHash}]</span></span>}
           <span className="output-tool-icon">{icon}</span>
           <span className="output-tool-name">{toolName}</span>
         </div>
@@ -274,7 +291,7 @@ export const HistoryLine = memo(function HistoryLine({
     const isError = content.toLowerCase().includes('error') || content.toLowerCase().includes('failed');
     return (
       <div className={`output-line output-tool-result ${isError ? 'is-error' : ''}`}>
-        {timeStr && <span className="output-timestamp">{timeStr}</span>}
+        {timeStr && <span className="output-timestamp" title={`${timestampMs} | ${debugHash}`}>{timeStr} <span style={{fontSize: '9px', color: '#888', fontFamily: 'monospace'}}>[{debugHash}]</span></span>}
         <span className="output-result-icon">{isError ? '❌' : '✓'}</span>
         <pre className="output-result-content">{highlightText(content, highlight)}</pre>
       </div>
@@ -290,7 +307,7 @@ export const HistoryLine = memo(function HistoryLine({
 
     return (
       <div className={className}>
-        {timeStr && <span className="output-timestamp">{timeStr}</span>}
+        {timeStr && <span className="output-timestamp" title={`${timestampMs} | ${debugHash}`}>{timeStr} <span style={{fontSize: '9px', color: '#888', fontFamily: 'monospace'}}>[{debugHash}]</span></span>}
         <span className="history-role">You</span>
         <span className="history-content markdown-content">
           {parsedBoss.hasContext && parsedBoss.context && (
@@ -311,7 +328,7 @@ export const HistoryLine = memo(function HistoryLine({
   if (delegationParsed.hasDelegation && delegationParsed.delegations.length > 0) {
     return (
       <div className={className}>
-        {timeStr && <span className="output-timestamp">{timeStr}</span>}
+        {timeStr && <span className="output-timestamp" title={`${timestampMs} | ${debugHash}`}>{timeStr} <span style={{fontSize: '9px', color: '#888', fontFamily: 'monospace'}}>[{debugHash}]</span></span>}
         <span className="history-role">Claude</span>
         <span className="history-content markdown-content">
           {highlight ? (
@@ -329,7 +346,7 @@ export const HistoryLine = memo(function HistoryLine({
 
   return (
     <div className={className}>
-      {timeStr && <span className="output-timestamp">{timeStr}</span>}
+      {timeStr && <span className="output-timestamp" title={`${timestampMs} | ${debugHash}`}>{timeStr} <span style={{fontSize: '9px', color: '#888', fontFamily: 'monospace'}}>[{debugHash}]</span></span>}
       <span className="history-role">Claude</span>
       <span className="history-content markdown-content">
         {highlight ? <div>{highlightText(content, highlight)}</div> : renderContentWithImages(content, onImageClick)}

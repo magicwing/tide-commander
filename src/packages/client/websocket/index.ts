@@ -620,6 +620,17 @@ function handleServerMessage(message: ServerMessage): void {
       onCustomClassesSync?.(store.getState().customAgentClasses);
       break;
     }
+
+    // ========================================================================
+    // Global Usage Messages
+    // ========================================================================
+
+    case 'global_usage': {
+      const usage = message.payload as import('../../shared/types').GlobalUsageStats | null;
+      console.log(`[WebSocket] Global usage update:`, usage);
+      store.setGlobalUsage(usage);
+      break;
+    }
   }
 
   perf.end(`ws:${message.type}`);

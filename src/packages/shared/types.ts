@@ -75,6 +75,30 @@ export interface ContextStats {
   lastUpdated: number;
 }
 
+// Global Claude API Usage Stats (from /usage command)
+export interface UsageCategory {
+  percentUsed: number;      // Percentage of limit used (e.g., 45.2)
+  resetTime: string;        // When the limit resets (e.g., "Jan 25 at 5:00 PM")
+}
+
+export interface GlobalUsageStats {
+  // Current session usage
+  session: UsageCategory;
+
+  // Weekly usage - all models combined
+  weeklyAllModels: UsageCategory;
+
+  // Weekly usage - Sonnet only
+  weeklySonnet: UsageCategory;
+
+  // Source agent that provided this data
+  sourceAgentId: string;
+  sourceAgentName: string;
+
+  // Timestamp
+  lastUpdated: number;
+}
+
 // Agent State
 export interface Agent {
   id: string;
@@ -715,7 +739,7 @@ export interface SupervisorConfig {
   intervalMs: number;
   maxNarrativesPerAgent: number;
   customPrompt?: string;
-  autoReportOnComplete?: boolean; // Generate report when agent completes task (default: true)
+  autoReportOnComplete?: boolean; // Generate report when agent completes task (default: false)
 }
 
 // Agent supervisor history entry - a snapshot of supervisor's analysis for a specific agent
@@ -766,6 +790,17 @@ export interface AgentAnalysisMessage extends WSMessage {
     agentId: string;
     analysis: AgentAnalysis;
   };
+}
+
+// Global Usage WebSocket messages
+export interface GlobalUsageMessage extends WSMessage {
+  type: 'global_usage';
+  payload: GlobalUsageStats | null;
+}
+
+export interface RequestGlobalUsageMessage extends WSMessage {
+  type: 'request_global_usage';
+  payload: Record<string, never>;
 }
 
 // Supervisor WebSocket messages (Client -> Server)
@@ -1243,7 +1278,8 @@ export type ServerMessage =
   | WorkPlanDeletedMessage
   | WorkPlansUpdateMessage
   | AnalysisRequestCreatedMessage
-  | AnalysisRequestCompletedMessage;
+  | AnalysisRequestCompletedMessage
+  | GlobalUsageMessage;
 
 export type ClientMessage =
   | SpawnAgentMessage
@@ -1286,4 +1322,5 @@ export type ClientMessage =
   | ExecuteWorkPlanMessage
   | PauseWorkPlanMessage
   | CancelWorkPlanMessage
-  | RequestWorkPlansMessage;
+  | RequestWorkPlansMessage
+  | RequestGlobalUsageMessage;

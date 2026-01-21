@@ -4,7 +4,7 @@
  */
 
 import { ClaudeRunner, StandardEvent } from '../claude/index.js';
-import { parseContextOutput } from '../claude/backend.js';
+import { parseContextOutput, parseUsageOutput } from '../claude/backend.js';
 import { getSessionActivityStatus } from '../claude/session-loader.js';
 import type { CustomAgentDefinition } from '../claude/types.js';
 import * as agentService from './agent-service.js';
@@ -32,8 +32,10 @@ const eventListeners = new Map<keyof ClaudeServiceEvents, Set<EventListener<any>
 // Claude Runner instance
 let runner: ClaudeRunner | null = null;
 
-// Track agents that are currently running /context to avoid infinite loops
-const pendingContextRefresh = new Set<string>();
+// Track agents with pending silent /context refresh to prevent recursive loops
+// When sendSilentCommand sends /context, the agentId is added here
+// When step_complete fires, we check this set to avoid triggering another /context
+const pendingSilentContextRefresh = new Set<string>();
 
 // Command started callback (set by websocket handler)
 let commandStartedCallback: ((agentId: string, command: string) => void) | null = null;
@@ -189,28 +191,27 @@ function handleEvent(agentId: string, event: StandardEvent): void {
         });
       }, 200);
 
-      // Auto-refresh context stats after turn completion (with delay to ensure idle state)
+      // Auto-refresh context stats after turn completion
       // Skip if:
-      // - This agent is already doing a /context refresh (to avoid infinite loop)
-      // - The last assigned task was a /context command (user already ran it)
+      // 1. The last assigned task was a /context command (user already ran it)
+      // 2. There's already a pending silent /context refresh for this agent
       const lastTask = agent.lastAssignedTask?.trim() || '';
       const isContextCommand = lastTask === '/context' || lastTask === '/cost' || lastTask === '/compact';
+      const hasPendingSilentRefresh = pendingSilentContextRefresh.has(agentId);
 
-      if (agent.sessionId && !pendingContextRefresh.has(agentId) && !isContextCommand) {
+      // Clear the pending flag since step_complete means the command finished
+      pendingSilentContextRefresh.delete(agentId);
+
+      if (agent.sessionId && !isContextCommand && !hasPendingSilentRefresh) {
+        // Small delay to let the process settle
         setTimeout(() => {
-          const currentAgent = agentService.getAgent(agentId);
-          if (currentAgent?.status === 'idle' && !pendingContextRefresh.has(agentId)) {
-            pendingContextRefresh.add(agentId);
-            // Use sendSilentCommand to avoid setting agent back to 'working' status
-            import('./claude-service.js').then(({ sendSilentCommand }) => {
-              sendSilentCommand(agentId, '/context')
-                .catch(() => { /* ignore context refresh errors */ })
-                .finally(() => {
-                  setTimeout(() => pendingContextRefresh.delete(agentId), 2000);
-                });
+          // Send /context to the running process or spawn new one
+          import('./claude-service.js').then(({ sendSilentCommand }) => {
+            sendSilentCommand(agentId, '/context').catch(() => {
+              // Ignore errors - context refresh is best-effort
             });
-          }
-        }, 500);
+          });
+        }, 300);
       }
       break;
     }
@@ -229,6 +230,23 @@ function handleEvent(agentId: string, event: StandardEvent): void {
             contextLimit: contextStats.contextWindow,
           });
         }
+      }
+      break;
+
+    case 'usage_stats':
+      console.log('[Claude] Received usage_stats event');
+      console.log('[Claude] usageStatsRaw:', event.usageStatsRaw?.substring(0, 200));
+      if (event.usageStatsRaw) {
+        const usageStats = parseUsageOutput(event.usageStatsRaw);
+        console.log('[Claude] Parsed usage stats:', usageStats);
+        if (usageStats) {
+          // Store in supervisor service for global access
+          supervisorService.updateGlobalUsage(agentId, agent.name, usageStats);
+        } else {
+          console.log('[Claude] Failed to parse usage stats');
+        }
+      } else {
+        console.log('[Claude] No usageStatsRaw in event');
       }
       break;
   }
@@ -384,9 +402,21 @@ export async function sendSilentCommand(agentId: string, command: string): Promi
     throw new Error(`Agent not found: ${agentId}`);
   }
 
-  // For silent commands, if agent is busy, just skip - don't interrupt
+  // Track /context commands to prevent recursive loops
+  // When step_complete fires, it will check this set before auto-refreshing
+  const isContextCommand = command.trim() === '/context' || command.trim() === '/cost' || command.trim() === '/compact';
+  if (isContextCommand) {
+    pendingSilentContextRefresh.add(agentId);
+  }
+
+  // If agent has a running process, send the command to it via stdin
+  // This is the expected case for /context refresh after step_complete
   if (runner.isRunning(agentId)) {
-    return;
+    const sent = runner.sendMessage(agentId, command);
+    if (sent) {
+      return;
+    }
+    // If sendMessage failed, fall through to spawn new process
   }
 
   // Execute silently - no status updates, no notifications

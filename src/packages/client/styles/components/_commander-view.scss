@@ -548,51 +548,12 @@
 
 .agent-panel-input {
   display: flex;
-  gap: 6px;
+  align-items: stretch;
+  gap: 0;
   padding: 6px 8px;
   background: rgba($dracula-bg, 0.95);
   border-top: 1px solid $dracula-current;
   flex-shrink: 0;
-  align-items: center;
-
-  input,
-  textarea {
-    flex: 1;
-    background: $dracula-bg-darker;
-    border: 1px solid $dracula-current;
-    border-radius: $radius-sm;
-    padding: 6px 8px;
-    color: $dracula-fg;
-    font-size: 12px;
-    font-family: $font-mono;
-
-    &:focus {
-      outline: none;
-      border-color: $dracula-purple;
-      box-shadow: 0 0 0 2px rgba($dracula-purple, 0.2);
-    }
-
-    &::placeholder {
-      color: $dracula-comment;
-    }
-  }
-
-  textarea {
-    resize: none;
-    min-height: 40px;
-    max-height: 150px;
-    line-height: 1.4;
-    overflow-y: auto;
-  }
-
-  &.agent-panel-input-expanded {
-    align-items: flex-start;
-
-    button {
-      margin-top: auto;
-      align-self: flex-end;
-    }
-  }
 
   .queue-badge {
     background: rgba($dracula-orange, 0.2);
@@ -605,27 +566,135 @@
     border: 1px solid rgba($dracula-orange, 0.4);
     white-space: nowrap;
   }
+}
 
-  button {
-    background: $dracula-purple;
-    border: none;
-    color: $dracula-bg;
-    padding: 6px 12px;
-    border-radius: $radius-sm;
-    cursor: pointer;
-    font-size: 11px;
-    font-weight: 600;
-    font-family: $font-mono;
-    transition: all $transition-fast;
+// Container that groups attach + input + send together (like Guake)
+.agent-panel-input-container {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  background: rgba($dracula-bg-darker, 0.6);
+  border: 1px solid rgba($dracula-comment, 0.25);
+  border-radius: $radius-md;
+  transition: all $transition-fast;
+  min-height: 32px;
 
-    &:hover:not(:disabled) {
-      background: $dracula-pink;
+  &:focus-within {
+    border-color: rgba($dracula-purple, 0.5);
+    background: rgba($dracula-bg-darker, 0.8);
+    box-shadow: 0 0 0 2px rgba($dracula-purple, 0.12);
+  }
+}
+
+.agent-panel-input input,
+.agent-panel-input textarea {
+  flex: 1;
+  background: transparent;
+  border: none;
+  padding: 6px 8px;
+  color: $dracula-fg;
+  font-size: 12px;
+  font-family: $font-mono;
+  line-height: 1.4;
+  min-width: 0; // Allow shrinking
+
+  &:focus {
+    outline: none;
+  }
+
+  &::placeholder {
+    color: rgba($dracula-comment, 0.6);
+  }
+}
+
+.agent-panel-input textarea {
+  resize: none;
+  min-height: 20px;
+  max-height: 120px;
+  overflow-y: auto;
+  height: auto;
+  field-sizing: content;
+
+  // Scrollbar styling
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: rgba($dracula-comment, 0.3);
+    border-radius: 2px;
+
+    &:hover {
+      background: rgba($dracula-comment, 0.5);
     }
+  }
+}
 
-    &:disabled {
-      opacity: 0.4;
-      cursor: not-allowed;
-    }
+// Expanded mode (multiline)
+.agent-panel-input-expanded {
+  .agent-panel-input-container {
+    align-items: flex-end;
+  }
+
+  .agent-panel-attach-btn,
+  .agent-panel-send-btn {
+    align-self: flex-end;
+    margin-bottom: 2px;
+  }
+}
+
+// Attach button - left side of input
+.agent-panel-attach-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  min-height: 30px;
+  background: transparent;
+  border: none;
+  color: rgba($dracula-comment, 0.7);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all $transition-fast;
+  flex-shrink: 0;
+  border-radius: $radius-md 0 0 $radius-md;
+
+  &:hover {
+    color: $dracula-cyan;
+    background: rgba($dracula-cyan, 0.08);
+  }
+}
+
+// Send button - right side of input
+.agent-panel-send-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  min-height: 30px;
+  background: transparent;
+  border: none;
+  color: $dracula-cyan;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all $transition-fast;
+  flex-shrink: 0;
+  padding: 0;
+  border-radius: 0 $radius-md $radius-md 0;
+
+  &:hover:not(:disabled) {
+    color: color.adjust($dracula-cyan, $lightness: 12%);
+    background: rgba($dracula-cyan, 0.08);
+  }
+
+  &:disabled {
+    opacity: 0.25;
+    cursor: not-allowed;
+    color: $dracula-comment;
   }
 }
 
@@ -963,24 +1032,6 @@
 
   &:hover {
     color: $dracula-red;
-  }
-}
-
-.agent-panel-attach-btn {
-  background: transparent;
-  border: 1px solid $dracula-current;
-  color: $dracula-comment;
-  padding: 4px 6px;
-  border-radius: $radius-sm;
-  font-size: 12px;
-  cursor: pointer;
-  transition: all $transition-fast;
-  flex-shrink: 0;
-
-  &:hover {
-    border-color: $dracula-cyan;
-    color: $dracula-cyan;
-    background: rgba($dracula-cyan, 0.1);
   }
 }
 

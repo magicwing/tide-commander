@@ -12,6 +12,7 @@ import type {
   AgentAnalysis,
   AgentSupervisorHistory,
   AgentSupervisorHistoryEntry,
+  GlobalUsageStats,
 } from '../../shared/types';
 import type { StoreState } from './types';
 
@@ -33,6 +34,10 @@ export interface SupervisorActions {
   addAgentAnalysis(agentId: string, analysis: AgentAnalysis): void;
   isLoadingHistoryForAgent(agentId: string): boolean;
   hasHistoryBeenFetched(agentId: string): boolean;
+  // Global usage tracking
+  setGlobalUsage(usage: GlobalUsageStats | null): void;
+  requestGlobalUsage(): void;
+  getGlobalUsage(): GlobalUsageStats | null;
 }
 
 export function createSupervisorActions(
@@ -192,6 +197,39 @@ export function createSupervisorActions(
 
     hasHistoryBeenFetched(agentId: string): boolean {
       return getState().supervisor.historyFetchedForAgents.has(agentId);
+    },
+
+    // Global usage tracking
+    setGlobalUsage(usage: GlobalUsageStats | null): void {
+      console.log('[Supervisor] setGlobalUsage called with:', usage);
+      setState((state) => {
+        state.supervisor.globalUsage = usage;
+        state.supervisor.refreshingUsage = false;
+      });
+      notify();
+    },
+
+    requestGlobalUsage(): void {
+      console.log('[Supervisor] requestGlobalUsage called');
+      setState((state) => {
+        state.supervisor.refreshingUsage = true;
+      });
+      notify();
+      const sendMessage = getSendMessage();
+      console.log('[Supervisor] sendMessage function:', sendMessage ? 'available' : 'null');
+      if (sendMessage) {
+        console.log('[Supervisor] Sending request_global_usage message');
+        sendMessage({
+          type: 'request_global_usage',
+          payload: {},
+        });
+      } else {
+        console.warn('[Supervisor] Cannot send request_global_usage - no sendMessage function');
+      }
+    },
+
+    getGlobalUsage(): GlobalUsageStats | null {
+      return getState().supervisor.globalUsage;
     },
   };
 }

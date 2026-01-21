@@ -56,6 +56,73 @@ const supervisorLog = createLogger('Supervisor');
 const clients = new Set<WebSocket>();
 
 // ============================================================================
+// Output Deduplication
+// ============================================================================
+
+/**
+ * Tracks seen output hashes per agent to prevent duplicates.
+ * Key: agentId, Value: Set of output hashes
+ */
+const seenOutputs = new Map<string, Set<string>>();
+
+// Max hashes to keep per agent before trimming (FIFO)
+const MAX_SEEN_HASHES = 200;
+
+/**
+ * Generate a hash key for an output message.
+ * Uses full text content to ensure uniqueness.
+ */
+function getOutputHash(text: string): string {
+  // Simple string hash for the full text
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) {
+    hash = ((hash << 5) - hash) + text.charCodeAt(i);
+    hash |= 0;
+  }
+  return (hash >>> 0).toString(16);
+}
+
+/**
+ * Check if an output is a duplicate and should be skipped.
+ * Simply checks if we've seen this exact text before for this agent.
+ */
+function isDuplicateOutput(agentId: string, text: string, _isStreaming: boolean): boolean {
+  const hash = getOutputHash(text);
+
+  // Get or create agent's seen set
+  let seen = seenOutputs.get(agentId);
+  if (!seen) {
+    seen = new Set();
+    seenOutputs.set(agentId, seen);
+  }
+
+  // Check if we've seen this hash before
+  if (seen.has(hash)) {
+    log.log(`[DEDUP] Skipping duplicate output for ${agentId}: "${text.slice(0, 50)}..."`);
+    return true;
+  }
+
+  // Record this hash
+  seen.add(hash);
+
+  // Trim if too many (keep most recent by converting to array and back)
+  if (seen.size > MAX_SEEN_HASHES) {
+    const arr = Array.from(seen);
+    const trimmed = arr.slice(-MAX_SEEN_HASHES);
+    seenOutputs.set(agentId, new Set(trimmed));
+  }
+
+  return false;
+}
+
+/**
+ * Clear dedup cache for an agent (called when agent is deleted/killed)
+ */
+export function clearOutputDedup(agentId: string): void {
+  seenOutputs.delete(agentId);
+}
+
+// ============================================================================
 // Broadcasting
 // ============================================================================
 
@@ -216,6 +283,39 @@ function handleClientMessage(ws: WebSocket, message: ClientMessage): void {
             payload: history,
           })
         );
+      }
+      break;
+
+    case 'request_global_usage':
+      {
+        console.log('[WS] Received request_global_usage');
+        // First, send current cached usage if available
+        const cachedUsage = supervisorService.getGlobalUsage();
+        console.log('[WS] Cached usage:', cachedUsage);
+        if (cachedUsage) {
+          ws.send(
+            JSON.stringify({
+              type: 'global_usage',
+              payload: cachedUsage,
+            })
+          );
+        }
+
+        // Then request a refresh from an idle agent
+        console.log('[WS] Requesting usage refresh from idle agent...');
+        supervisorService.requestUsageRefresh().then((agentId) => {
+          console.log('[WS] Usage refresh result - agentId:', agentId);
+          if (!agentId && !cachedUsage) {
+            console.log('[WS] No agent available and no cached usage, sending null');
+            ws.send(
+              JSON.stringify({
+                type: 'global_usage',
+                payload: null, // No data available
+              })
+            );
+          }
+          // If refresh was requested, the response will come through the event system
+        });
       }
       break;
 
@@ -392,6 +492,19 @@ function setupServiceListeners(): void {
   });
 
   claudeService.on('output', (agentId, text, isStreaming) => {
+    // Server-side deduplication to prevent duplicate messages during streaming
+    const isDuplicate = isDuplicateOutput(agentId, text, isStreaming || false);
+
+    // Debug logging for tool outputs to track duplicates
+    if (text.startsWith('Using tool:') || text.startsWith('Tool input:') || text.startsWith('Tool result:')) {
+      const textPreview = text.slice(0, 80).replace(/\n/g, '\\n');
+      log.log(`[OUTPUT] agent=${agentId.slice(0,4)} streaming=${isStreaming} duplicate=${isDuplicate} text="${textPreview}..."`);
+    }
+
+    if (isDuplicate) {
+      return;
+    }
+
     broadcast({
       type: 'output' as any,
       payload: {
@@ -462,6 +575,13 @@ function setupServiceListeners(): void {
         broadcast({
           type: 'supervisor_status',
           payload: supervisorService.getStatus(),
+        } as ServerMessage);
+        break;
+      case 'global_usage':
+        console.log('[WS] Broadcasting global_usage event:', data);
+        broadcast({
+          type: 'global_usage',
+          payload: data,
         } as ServerMessage);
         break;
     }

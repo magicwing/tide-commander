@@ -1,17 +1,20 @@
 /**
  * AgentPanel component - displays a single agent's output and input in CommanderView
- * Uses shared components from ClaudeOutputPanel (Guake) for consistent rendering
+ *
+ * This is a lightweight wrapper that reuses:
+ * - HistoryLine/OutputLine from ClaudeOutputPanel for message rendering
+ * - TerminalInput from shared components for input handling
  */
 
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import type { Agent } from '../../../shared/types';
-import { useStore, store, ClaudeOutput } from '../../store';
+import { useSupervisor, store, ClaudeOutput } from '../../store';
 import { formatTokens } from '../../utils/formatting';
-import { useAgentInput } from './useAgentInput';
-// Reuse components from ClaudeOutputPanel (Guake) for consistent rendering
 import { HistoryLine } from '../ClaudeOutputPanel/HistoryLine';
 import { OutputLine } from '../ClaudeOutputPanel/OutputLine';
-import type { AgentHistory } from './types';
+import { TerminalInput } from '../shared/TerminalInput';
+import { useFilteredOutputs } from '../shared/useFilteredOutputs';
+import type { AgentHistory, AttachedFile } from './types';
 import { STATUS_COLORS, SCROLL_THRESHOLD } from './types';
 
 interface AgentPanelProps {
@@ -39,53 +42,71 @@ export function AgentPanel({
   inputRef,
   onLoadMore,
 }: AgentPanelProps) {
-  const state = useStore();
+  const supervisor = useSupervisor();
   const outputRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const scrollPositionRef = useRef<number>(0);
+  const isUserScrolledUpRef = useRef(false);
 
-  // Use the custom hook for input management
-  const {
-    command,
-    setCommand,
-    forceTextarea,
-    setForceTextarea,
-    useTextarea,
-    getTextareaRows,
-    addPastedText,
-    expandPastedTexts,
-    attachedFiles,
-    addAttachedFile,
-    removeAttachedFile,
-    uploadFile,
-    resetInput,
-  } = useAgentInput();
+  // Input state - simple local state since Commander panels don't persist
+  const [command, setCommand] = useState('');
+  const [forceTextarea, setForceTextarea] = useState(false);
+  const [pastedTexts, setPastedTexts] = useState<Map<number, string>>(new Map());
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const pastedCountRef = useRef(0);
+  const fileCountRef = useRef(0);
+
+  // Computed values
+  const useTextarea = forceTextarea || command.includes('\n') || command.length > 50;
+  const canSend = command.trim().length > 0 || attachedFiles.length > 0;
+
+  // Filter outputs based on view mode (same as Guake terminal)
+  const viewFilteredOutputs = useFilteredOutputs({
+    outputs,
+    viewMode: advancedView ? 'advanced' : 'simple',
+  });
+
+  // Deduplicate outputs against history to prevent showing same content twice
+  // This handles the case where outputs arrive AFTER history is loaded
+  const filteredOutputs = useMemo(() => {
+    if (!history?.messages.length) return viewFilteredOutputs;
+
+    // Create a Set of content hashes from history messages for fast lookup
+    const historyContentHashes = new Set<string>();
+    for (const msg of history.messages) {
+      // Use first 200 chars of content as hash key (same as server-side dedup)
+      const contentKey = msg.content.slice(0, 200);
+      historyContentHashes.add(contentKey);
+    }
+
+    // Filter out outputs whose content already exists in history
+    return viewFilteredOutputs.filter(output => {
+      const outputContentKey = output.text.slice(0, 200);
+      return !historyContentHashes.has(outputContentKey);
+    });
+  }, [viewFilteredOutputs, history?.messages]);
 
   // Get supervisor status for this agent
   const supervisorStatus = useMemo(() => {
-    const report = state.supervisor?.lastReport;
+    const report = supervisor?.lastReport;
     if (!report?.agentSummaries) return null;
     return report.agentSummaries.find(
       s => s.agentId === agent.id || s.agentName === agent.name
     );
-  }, [state.supervisor?.lastReport, agent.id, agent.name]);
+  }, [supervisor?.lastReport, agent.id, agent.name]);
 
   // Calculate context usage info
   const contextInfo = useMemo(() => {
     const stats = agent.contextStats;
     if (stats) {
-      const usedPercent = stats.usedPercent;
-      const freePercent = 100 - usedPercent;
       return {
-        usedPercent,
-        freePercent,
+        usedPercent: stats.usedPercent,
+        freePercent: 100 - stats.usedPercent,
         hasData: true,
         totalTokens: stats.totalTokens,
         contextWindow: stats.contextWindow,
       };
     }
-    // Fallback to basic calculation
     const used = agent.contextUsed || 0;
     const limit = agent.contextLimit || 200000;
     const usedPercent = (used / limit) * 100;
@@ -98,15 +119,17 @@ export function AgentPanel({
     };
   }, [agent.contextStats, agent.contextUsed, agent.contextLimit]);
 
-  // Handle scroll to detect when to load more
+  // Handle scroll to detect when to load more and track if user scrolled up
   const handleScroll = useCallback(() => {
-    if (!outputRef.current || loadingMore || !history?.hasMore || !onLoadMore) return;
+    if (!outputRef.current) return;
 
-    // Check if scrolled near top
-    if (outputRef.current.scrollTop < SCROLL_THRESHOLD) {
+    const { scrollTop, scrollHeight, clientHeight } = outputRef.current;
+    const isAtBottom = scrollHeight - scrollTop - clientHeight < 150;
+    isUserScrolledUpRef.current = !isAtBottom;
+
+    if (!loadingMore && history?.hasMore && onLoadMore && scrollTop < SCROLL_THRESHOLD) {
       setLoadingMore(true);
-      // Save scroll position
-      scrollPositionRef.current = outputRef.current.scrollHeight - outputRef.current.scrollTop;
+      scrollPositionRef.current = scrollHeight - scrollTop;
       onLoadMore();
     }
   }, [loadingMore, history?.hasMore, onLoadMore]);
@@ -115,7 +138,6 @@ export function AgentPanel({
   useEffect(() => {
     if (loadingMore && history && !history.loading) {
       setLoadingMore(false);
-      // Restore scroll position after new messages are prepended
       requestAnimationFrame(() => {
         if (outputRef.current) {
           outputRef.current.scrollTop = outputRef.current.scrollHeight - scrollPositionRef.current;
@@ -124,148 +146,130 @@ export function AgentPanel({
     }
   }, [history, loadingMore]);
 
-  // Auto-scroll on new content
+  // Scroll to bottom when panel first opens or becomes expanded
+  const prevExpandedRef = useRef(isExpanded);
   useEffect(() => {
-    if (outputRef.current) {
-      outputRef.current.scrollTop = outputRef.current.scrollHeight;
+    if (isExpanded && !prevExpandedRef.current) {
+      isUserScrolledUpRef.current = false;
     }
-  }, [history?.messages.length, outputs.length]);
+    prevExpandedRef.current = isExpanded;
 
-  // Handle paste event - collapse large pastes into variables or upload images
-  const handlePaste = async (e: React.ClipboardEvent) => {
-    const items = e.clipboardData.items;
+    requestAnimationFrame(() => {
+      if (outputRef.current) {
+        outputRef.current.scrollTop = outputRef.current.scrollHeight;
+      }
+    });
+  }, [isExpanded]);
 
-    // Check for images first
-    for (const item of items) {
-      if (item.type.startsWith('image/')) {
-        e.preventDefault();
-        const blob = item.getAsFile();
-        if (blob) {
-          const attached = await uploadFile(blob);
-          if (attached) {
-            addAttachedFile(attached);
-          }
+  // Scroll to bottom when history finishes loading
+  const prevLoadingRef = useRef(history?.loading);
+  useEffect(() => {
+    if (prevLoadingRef.current && !history?.loading) {
+      isUserScrolledUpRef.current = false;
+      requestAnimationFrame(() => {
+        if (outputRef.current) {
+          outputRef.current.scrollTop = outputRef.current.scrollHeight;
         }
-        return;
-      }
+      });
     }
+    prevLoadingRef.current = history?.loading;
+  }, [history?.loading]);
 
-    // Check for files
-    const files = e.clipboardData.files;
-    if (files.length > 0) {
-      e.preventDefault();
-      for (const file of files) {
-        const attached = await uploadFile(file);
-        if (attached) {
-          addAttachedFile(attached);
+  // Auto-scroll on new content (only if user is at bottom)
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      if (outputRef.current) {
+        const { scrollTop, scrollHeight, clientHeight } = outputRef.current;
+        const isAtBottom = scrollHeight - scrollTop - clientHeight < 150;
+        // Only auto-scroll if user is at (or near) bottom
+        if (isAtBottom) {
+          outputRef.current.scrollTop = scrollHeight;
         }
       }
-      return;
+    });
+  }, [history?.messages.length, filteredOutputs.length]);
+
+  // Input handlers
+  const handleAddPastedText = useCallback((text: string): number => {
+    pastedCountRef.current += 1;
+    const id = pastedCountRef.current;
+    setPastedTexts(prev => new Map(prev).set(id, text));
+    return id;
+  }, []);
+
+  const handleAddFile = useCallback((file: AttachedFile) => {
+    setAttachedFiles(prev => [...prev, file]);
+  }, []);
+
+  const handleRemoveFile = useCallback((id: number) => {
+    setAttachedFiles(prev => prev.filter(f => f.id !== id));
+  }, []);
+
+  const uploadFile = useCallback(async (file: File | Blob, filename?: string): Promise<AttachedFile | null> => {
+    try {
+      const response = await fetch('/api/files/upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': file.type || 'application/octet-stream',
+          'X-Filename': filename || (file instanceof File ? file.name : ''),
+        },
+        body: file,
+      });
+
+      if (!response.ok) return null;
+
+      const data = await response.json();
+      fileCountRef.current += 1;
+
+      return {
+        id: fileCountRef.current,
+        name: data.filename,
+        path: data.absolutePath,
+        isImage: data.isImage,
+        size: data.size,
+      };
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const handleSend = useCallback(() => {
+    if (!canSend) return;
+
+    // Expand pasted text placeholders
+    let fullCommand = command.trim();
+    for (const [id, pastedText] of pastedTexts) {
+      const placeholder = new RegExp(`\\[Pasted text #${id} \\+\\d+ lines\\]`, 'g');
+      fullCommand = fullCommand.replace(placeholder, pastedText);
     }
 
-    // Handle text paste (collapse large text)
-    const pastedText = e.clipboardData.getData('text');
-    const lineCount = (pastedText.match(/\n/g) || []).length + 1;
-
-    // If pasting more than 5 lines, collapse into a variable
-    if (lineCount > 5) {
-      e.preventDefault();
-      const pasteId = addPastedText(pastedText);
-
-      // Insert placeholder in command
-      const placeholder = `[Pasted text #${pasteId} +${lineCount} lines]`;
-      const target = e.target as HTMLInputElement | HTMLTextAreaElement;
-      const start = target.selectionStart || 0;
-      const end = target.selectionEnd || 0;
-      const newCommand = command.slice(0, start) + placeholder + command.slice(end);
-      setCommand(newCommand);
-
-      // Auto-expand to textarea if needed
-      if (!useTextarea) {
-        setForceTextarea(true);
-      }
-    }
-  };
-
-  // Handle file input change
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
-
-    for (const file of files) {
-      const attached = await uploadFile(file);
-      if (attached) {
-        addAttachedFile(attached);
-      }
-    }
-
-    // Reset input
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  };
-
-  const handleSend = () => {
-    if (!command.trim() && attachedFiles.length === 0) return;
-
-    // Build the full command with attachments
-    let fullCommand = expandPastedTexts(command.trim());
-
-    // Add file references for Claude to read
+    // Add file references
     if (attachedFiles.length > 0) {
       const fileRefs = attachedFiles
-        .map(f => {
-          if (f.isImage) {
-            return `[Image: ${f.path}]`;
-          } else {
-            return `[File: ${f.path}]`;
-          }
-        })
+        .map(f => f.isImage ? `[Image: ${f.path}]` : `[File: ${f.path}]`)
         .join('\n');
-
-      if (fullCommand) {
-        fullCommand = `${fullCommand}\n\n${fileRefs}`;
-      } else {
-        fullCommand = fileRefs;
-      }
+      fullCommand = fullCommand ? `${fullCommand}\n\n${fileRefs}` : fileRefs;
     }
 
     store.sendCommand(agent.id, fullCommand);
-    resetInput();
-  };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    // Shift+Enter: switch to textarea mode (from input) or add newline (in textarea)
-    if (e.key === 'Enter' && e.shiftKey) {
-      if (!useTextarea) {
-        e.preventDefault();
-        setForceTextarea(true);
-      }
-      // In textarea, let default behavior add newline
-      return;
-    }
-    // Regular Enter: send command
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      handleSend();
-    }
-  };
+    // Reset input state
+    setCommand('');
+    setForceTextarea(false);
+    setPastedTexts(new Map());
+    setAttachedFiles([]);
+    pastedCountRef.current = 0;
+  }, [agent.id, command, canSend, pastedTexts, attachedFiles]);
 
   const statusColor = STATUS_COLORS[agent.status] || '#888888';
-
-  // In simple mode (advancedView=false), we show all messages but HistoryLine renders them simplified
-  // In advanced mode, we show everything with full details
   const messages = history?.messages || [];
-
-  // Convert live outputs to the format expected by Guake's OutputLine
-  // The Guake OutputLine expects agentId for certain features
-  const liveOutputs = outputs;
 
   return (
     <div
       className={`agent-panel ${agent.status === 'working' ? 'working' : ''} ${isExpanded ? 'expanded' : ''} ${isFocused ? 'focused' : ''}`}
       onClick={onFocus}
     >
+      {/* Header */}
       <div className="agent-panel-header">
         <div className="agent-panel-info">
           <span
@@ -284,7 +288,6 @@ export function AgentPanel({
             [{agent.id.substring(0, 4)}]
           </span>
         </div>
-        {/* Context usage indicator */}
         <div
           className="agent-panel-context"
           title={`Context: ${Math.round(contextInfo.usedPercent)}% used (${formatTokens(contextInfo.totalTokens)} / ${formatTokens(contextInfo.contextWindow)})`}
@@ -318,28 +321,14 @@ export function AgentPanel({
             title={isExpanded ? 'Collapse (Esc)' : 'Expand'}
           >
             {isExpanded ? (
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <polyline points="4 14 10 14 10 20" />
                 <polyline points="20 10 14 10 14 4" />
                 <line x1="14" y1="10" x2="21" y2="3" />
                 <line x1="3" y1="21" x2="10" y2="14" />
               </svg>
             ) : (
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <polyline points="15 3 21 3 21 9" />
                 <polyline points="9 21 3 21 3 15" />
                 <line x1="21" y1="3" x2="14" y2="10" />
@@ -355,12 +344,12 @@ export function AgentPanel({
         <div className="agent-panel-supervisor-status">{supervisorStatus.statusDescription}</div>
       )}
 
+      {/* Output Content */}
       <div className="agent-panel-content" ref={outputRef} onScroll={handleScroll}>
         {history?.loading ? (
           <div className="agent-panel-loading">Loading...</div>
         ) : (
           <>
-            {/* Load more indicator */}
             {history?.hasMore && (
               <div className="agent-panel-load-more">
                 {loadingMore ? (
@@ -380,14 +369,14 @@ export function AgentPanel({
                 simpleView={!advancedView}
               />
             ))}
-            {liveOutputs.map((output, i) => (
+            {filteredOutputs.map((output, i) => (
               <OutputLine
                 key={`o-${i}`}
                 output={output}
                 agentId={agent.id}
               />
             ))}
-            {!messages.length && !liveOutputs.length && (
+            {!messages.length && !filteredOutputs.length && (
               <div className="agent-panel-empty">
                 No messages yet
                 {!agent.sessionId && (
@@ -416,71 +405,24 @@ export function AgentPanel({
         )}
       </div>
 
-      {/* Attached files display */}
-      {attachedFiles.length > 0 && (
-        <div className="agent-panel-attachments">
-          {attachedFiles.map(file => (
-            <div
-              key={file.id}
-              className={`agent-panel-attachment ${file.isImage ? 'is-image' : ''}`}
-            >
-              <span className="agent-panel-attachment-icon">{file.isImage ? '🖼️' : '📎'}</span>
-              <span className="agent-panel-attachment-name" title={file.path}>
-                {file.name}
-              </span>
-              <button
-                className="agent-panel-attachment-remove"
-                onClick={() => removeAttachedFile(file.id)}
-                title="Remove"
-              >
-                ×
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className={`agent-panel-input ${useTextarea ? 'agent-panel-input-expanded' : ''}`}>
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          onChange={handleFileSelect}
-          style={{ display: 'none' }}
-          accept="image/*,.txt,.md,.json,.js,.ts,.tsx,.jsx,.py,.sh,.css,.scss,.html,.xml,.yaml,.yml,.toml,.ini,.cfg,.conf"
-        />
-        <button
-          className="agent-panel-attach-btn"
-          onClick={() => fileInputRef.current?.click()}
-          title="Attach file (or paste image)"
-        >
-          📎
-        </button>
-        {useTextarea ? (
-          <textarea
-            ref={inputRef as React.RefCallback<HTMLTextAreaElement>}
-            placeholder={`Command ${agent.name}... (paste image)`}
-            value={command}
-            onChange={e => setCommand(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onPaste={handlePaste}
-            rows={getTextareaRows()}
-          />
-        ) : (
-          <input
-            ref={inputRef as React.RefCallback<HTMLInputElement>}
-            type="text"
-            placeholder={`Command ${agent.name}... (paste image)`}
-            value={command}
-            onChange={e => setCommand(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onPaste={handlePaste}
-          />
-        )}
-        <button onClick={handleSend} disabled={!command.trim() && attachedFiles.length === 0}>
-          Send
-        </button>
-      </div>
+      {/* Input - using shared TerminalInput */}
+      <TerminalInput
+        command={command}
+        onCommandChange={setCommand}
+        useTextarea={useTextarea}
+        forceTextarea={forceTextarea}
+        onForceTextarea={setForceTextarea}
+        onSend={handleSend}
+        canSend={canSend}
+        attachedFiles={attachedFiles}
+        onAddFile={handleAddFile}
+        onRemoveFile={handleRemoveFile}
+        uploadFile={uploadFile}
+        onAddPastedText={handleAddPastedText}
+        placeholder={`Command ${agent.name}...`}
+        compact={true}
+        inputRef={inputRef}
+      />
     </div>
   );
 }
