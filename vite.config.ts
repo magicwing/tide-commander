@@ -5,6 +5,7 @@ import react from '@vitejs/plugin-react';
 // Port configuration - can be overridden via environment variables
 const SERVER_PORT = process.env.PORT || 5174;
 const VITE_PORT = process.env.VITE_PORT || 5173;
+const VITE_HOST = process.env.LISTEN_ALL_INTERFACES ? '0.0.0.0' : '127.0.0.1';
 
 export default defineConfig({
   plugins: [react()],
@@ -18,7 +19,7 @@ export default defineConfig({
     },
   },
   server: {
-    //host: '0.0.0.0',
+    host: VITE_HOST,
     port: Number(VITE_PORT),
     proxy: {
       '/api': {

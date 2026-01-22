@@ -12,6 +12,7 @@ import { logger } from './utils/logger.js';
 
 // Configuration
 const PORT = process.env.PORT || 5174;
+const HOST = process.env.LISTEN_ALL_INTERFACES ? '0.0.0.0' : '127.0.0.1';
 
 // ============================================================================
 // Global Error Handlers
@@ -62,10 +63,10 @@ async function main(): Promise<void> {
   websocket.init(server);
 
   // Start server
-  server.listen(PORT, () => {
-    logger.server.log(`Server running on http://localhost:${PORT}`);
-    logger.server.log(`WebSocket available at ws://localhost:${PORT}/ws`);
-    logger.server.log(`API available at http://localhost:${PORT}/api`);
+  server.listen(Number(PORT), HOST, () => {
+    logger.server.log(`Server running on http://${HOST}:${PORT}`);
+    logger.server.log(`WebSocket available at ws://${HOST}:${PORT}/ws`);
+    logger.server.log(`API available at http://${HOST}:${PORT}/api`);
   });
 
   // Graceful shutdown
