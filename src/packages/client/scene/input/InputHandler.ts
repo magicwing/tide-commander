@@ -86,7 +86,7 @@ export class InputHandler {
   private hoveredAgentId: string | null = null;
   private hoverTimer: ReturnType<typeof setTimeout> | null = null;
   private lastMousePos: { x: number; y: number } = { x: 0, y: 0 };
-  private static readonly HOVER_DELAY = 200; // 200ms
+  private static readonly HOVER_DELAY = 400; // 400ms
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -217,6 +217,7 @@ export class InputHandler {
     this.canvas.removeEventListener('pointermove', this.onPointerMove);
     this.canvas.removeEventListener('pointerup', this.onPointerUp);
     this.canvas.removeEventListener('pointercancel', this.onPointerCancel);
+    this.canvas.removeEventListener('pointerleave', this.onPointerLeave);
     this.canvas.removeEventListener('contextmenu', this.onContextMenu);
     this.canvas.removeEventListener('wheel', this.onWheel);
     this.canvas.removeEventListener('touchstart', this.onTouchStart);
@@ -304,6 +305,7 @@ export class InputHandler {
     this.canvas.addEventListener('pointermove', this.onPointerMove);
     this.canvas.addEventListener('pointerup', this.onPointerUp);
     this.canvas.addEventListener('pointercancel', this.onPointerCancel);
+    this.canvas.addEventListener('pointerleave', this.onPointerLeave);
     this.canvas.addEventListener('contextmenu', this.onContextMenu);
     this.canvas.addEventListener('wheel', this.onWheel, { passive: false });
     this.canvas.addEventListener('touchstart', this.onTouchStart, { passive: false });
@@ -526,6 +528,15 @@ export class InputHandler {
 
   private onPointerCancel = (event: PointerEvent): void => {
     this.touchHandler.onPointerCancel(event.pointerId);
+  };
+
+  private onPointerLeave = (_event: PointerEvent): void => {
+    // Clear hover state when mouse leaves the canvas
+    this.clearHoverTimer();
+    if (this.hoveredAgentId !== null) {
+      this.hoveredAgentId = null;
+      this.callbacks.onAgentHover?.(null, null);
+    }
   };
 
   private onContextMenu = (event: MouseEvent): void => {

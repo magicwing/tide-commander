@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.2] - 2026-01-22
+
+### Fixed
+- Fixed tooltip on hover agent appearing too fast (increased delay from 200ms to 400ms)
+- Fixed hover state persisting when mouse leaves canvas (added pointerleave handler)
+
 ## [0.7.1] - 2026-01-22
 
 ### Added
