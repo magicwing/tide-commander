@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.5] - 2026-01-22
+
+### Added
+- Live skill injection for running agents (skills are injected on next command without restart)
+- Pending skill update tracking in skill-service
+- Skill update notification builder for seamless skill additions
+
+### Changed
+- Command handler now injects skill updates when skills are assigned to running agents
+
 ## [0.6.4] - 2026-01-22
 
 ### Changed

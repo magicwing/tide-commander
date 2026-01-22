@@ -160,8 +160,19 @@ async function handleRegularAgentCommand(
     log.log(` Agent ${agent.name} NO customAgentConfig (no instructions or skills)`);
   }
 
+  // Check if agent has pending skill updates - inject into message if so
+  let finalCommand = command;
+  if (skillService.hasPendingSkillUpdates(agentId)) {
+    const skillNotification = skillService.buildSkillUpdateNotification(agentId, agent.class as import('../../../shared/types.js').AgentClass);
+    if (skillNotification) {
+      finalCommand = skillNotification + command;
+      log.log(` Agent ${agent.name}: Injecting skill update notification (${skillNotification.length} chars)`);
+    }
+    skillService.clearPendingSkillUpdates(agentId);
+  }
+
   try {
-    await claudeService.sendCommand(agentId, command, undefined, undefined, customAgentConfig);
+    await claudeService.sendCommand(agentId, finalCommand, undefined, undefined, customAgentConfig);
   } catch (err: any) {
     log.error(' Failed to send command:', err);
     ctx.sendActivity(agentId, `Error: ${err.message}`);

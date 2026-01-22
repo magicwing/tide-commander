@@ -19,6 +19,9 @@ const skills = new Map<string, Skill>();
 type SkillListener = (event: string, skill: Skill | string) => void;
 const listeners = new Set<SkillListener>();
 
+// Track agents that have pending skill updates (need to be notified on next command)
+const pendingSkillUpdates = new Set<string>();
+
 // ============================================================================
 // Initialization
 // ============================================================================
@@ -206,6 +209,9 @@ export function assignSkillToAgent(skillId: string, agentId: string): Skill | un
   // unlike 'updated' which is for content changes that require agent restarts
   emit('assigned', updatedSkill);
 
+  // Mark agent as having pending skill updates (will be injected on next command)
+  pendingSkillUpdates.add(agentId);
+
   log.log(` Assigned skill "${skill.name}" to agent ${agentId}`);
   return updatedSkill;
 }
@@ -329,6 +335,55 @@ export function removeAgentFromAllSkills(agentId: string): void {
   }
 }
 
+/**
+ * Check if an agent has pending skill updates that need to be injected
+ */
+export function hasPendingSkillUpdates(agentId: string): boolean {
+  return pendingSkillUpdates.has(agentId);
+}
+
+/**
+ * Clear pending skill updates for an agent (call after injecting skills into message)
+ */
+export function clearPendingSkillUpdates(agentId: string): void {
+  pendingSkillUpdates.delete(agentId);
+}
+
+/**
+ * Build a skill update notification to inject into a message
+ * This is used to notify running agents about new skills without restarting
+ */
+export function buildSkillUpdateNotification(agentId: string, agentClass: AgentClass): string {
+  const agentSkills = getSkillsForAgent(agentId, agentClass);
+
+  if (agentSkills.length === 0) {
+    return '';
+  }
+
+  const sections = agentSkills.map(skill => {
+    let section = `## Skill: ${skill.name}\n\n`;
+    section += `**Description:** ${skill.description}\n\n`;
+
+    if (skill.allowedTools.length > 0) {
+      section += `**Allowed Tools:** ${skill.allowedTools.join(', ')}\n\n`;
+    }
+
+    section += skill.content;
+    return section;
+  });
+
+  return `
+---
+# 🔄 SKILL UPDATE
+
+Your available skills have been updated. Here are your current skills:
+
+${sections.join('\n\n---\n\n')}
+---
+
+`;
+}
+
 // Export skill service as a singleton-like object for consistency
 export const skillService = {
   init: initSkills,
@@ -346,4 +401,7 @@ export const skillService = {
   buildSkillPromptContent,
   getAllowedToolsForAgent,
   removeAgentFromAllSkills,
+  hasPendingSkillUpdates,
+  clearPendingSkillUpdates,
+  buildSkillUpdateNotification,
 };
