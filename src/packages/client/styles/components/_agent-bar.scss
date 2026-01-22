@@ -124,6 +124,88 @@
   }
 }
 
+// Area folders within group
+.agent-bar-folders {
+  display: flex;
+  flex-direction: row;
+  gap: 2px;
+  padding: 2px 4px;
+  background: rgba($dracula-bg-darker, 0.6);
+  border-radius: $radius-sm;
+  border: 1px solid rgba($dracula-current, 0.4);
+}
+
+.agent-bar-folder-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: $radius-sm;
+  transition: all $transition-fast;
+  position: relative;
+  cursor: pointer;
+
+  &:hover {
+    background: rgba($dracula-green, 0.2);
+    transform: scale(1.1);
+
+    .agent-bar-folder-tooltip {
+      opacity: 1;
+      visibility: visible;
+      transform: translateX(-50%) translateY(0);
+    }
+  }
+}
+
+.agent-bar-folder-icon {
+  font-size: 12px;
+}
+
+.agent-bar-folder-tooltip {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  background: rgba($dracula-bg, 0.98);
+  border: 1px solid $dracula-green;
+  border-radius: $radius-sm;
+  padding: 6px 10px;
+  font-family: $font-mono;
+  z-index: 300;
+  opacity: 0;
+  visibility: hidden;
+  transition: all $transition-fast;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  margin-bottom: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 5px solid transparent;
+    border-top-color: $dracula-green;
+  }
+}
+
+.agent-bar-folder-tooltip-path {
+  font-size: 10px;
+  color: $dracula-green;
+  white-space: nowrap;
+}
+
+.agent-bar-folder-tooltip-hint {
+  font-size: 8px;
+  color: $dracula-comment;
+  text-align: center;
+}
+
 // Area label positioned at top of group border
 .agent-bar-area-label {
   position: absolute;

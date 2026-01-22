@@ -286,7 +286,7 @@ export interface AnalysisRequestDraft {
 // ============================================================================
 
 // Building types - different kinds of buildings
-export type BuildingType = 'server' | 'link' | 'database' | 'docker' | 'monitor';
+export type BuildingType = 'server' | 'link' | 'database' | 'docker' | 'monitor' | 'folder';
 
 export const BUILDING_TYPES: Record<BuildingType, { icon: string; color: string; description: string }> = {
   server: { icon: '🖥️', color: '#4aff9e', description: 'Service with start/stop commands and logs' },
@@ -294,6 +294,7 @@ export const BUILDING_TYPES: Record<BuildingType, { icon: string; color: string;
   database: { icon: '🗄️', color: '#ff9e4a', description: 'Database connection and queries' },
   docker: { icon: '🐳', color: '#4ac1ff', description: 'Docker container management' },
   monitor: { icon: '📊', color: '#ff4a9e', description: 'System metrics and monitoring' },
+  folder: { icon: '📁', color: '#ffd700', description: 'Folder shortcut - opens file explorer on click' },
 };
 
 // Building status
@@ -340,6 +341,9 @@ export interface Building {
 
   // Working directory for commands
   cwd?: string;
+
+  // Folder path (for folder type - opens file explorer when clicked)
+  folderPath?: string;
 
   // Links (for link type, but can be used by any)
   urls?: { label: string; url: string }[];

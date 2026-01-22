@@ -54,6 +54,7 @@ export function BuildingConfigModal({
   const [logsCmd, setLogsCmd] = useState('');
   const [urls, setUrls] = useState<{ label: string; url: string }[]>([]);
   const [showLogs, setShowLogs] = useState(false);
+  const [folderPath, setFolderPath] = useState('');
 
   const nameInputRef = useRef<HTMLInputElement>(null);
   const logsContainerRef = useRef<HTMLDivElement>(null);
@@ -74,6 +75,7 @@ export function BuildingConfigModal({
         setHealthCheckCmd(building.commands?.healthCheck || '');
         setLogsCmd(building.commands?.logs || '');
         setUrls(building.urls || []);
+        setFolderPath(building.folderPath || '');
       } else {
         // Create mode - reset
         setName('New Server');
@@ -87,6 +89,7 @@ export function BuildingConfigModal({
         setHealthCheckCmd('');
         setLogsCmd('');
         setUrls([]);
+        setFolderPath('');
       }
 
       setTimeout(() => nameInputRef.current?.focus(), 100);
@@ -110,6 +113,7 @@ export function BuildingConfigModal({
       color: color || undefined,
       position: initialPosition || building?.position || { x: 0, z: 0 },
       cwd: cwd || undefined,
+      folderPath: folderPath || undefined,
       commands: {
         start: startCmd || undefined,
         stop: stopCmd || undefined,
@@ -265,6 +269,24 @@ export function BuildingConfigModal({
                 placeholder="/path/to/project"
               />
             </div>
+
+            {/* Folder Path Section (for folder type) */}
+            {type === 'folder' && (
+              <div className="form-section">
+                <label className="form-label">Folder Path</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={folderPath}
+                  onChange={(e) => setFolderPath(e.target.value)}
+                  placeholder="/path/to/folder"
+                  required
+                />
+                <div className="form-hint">
+                  Click this building to open the file explorer at this path
+                </div>
+              </div>
+            )}
 
             {/* Commands Section (for server type) */}
             {type === 'server' && (

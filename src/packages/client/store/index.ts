@@ -80,6 +80,7 @@ export {
   useMobileView,
   useFileViewerPath,
   useFileViewerEditData,
+  useExplorerFolderPath,
   useContextModalAgentId,
   useToolExecutions,
   useFileChanges,
@@ -147,6 +148,7 @@ class Store
       shortcuts: this.loadShortcuts(),
       fileViewerPath: null,
       fileViewerEditData: null,
+      explorerFolderPath: null,
       contextModalAgentId: null,
       supervisor: {
         enabled: true,
@@ -295,6 +297,25 @@ class Store
   clearFileViewerPath(): void {
     this.state.fileViewerPath = null;
     this.state.fileViewerEditData = null;
+    this.notify();
+  }
+
+  // ============================================================================
+  // File Explorer
+  // ============================================================================
+
+  setExplorerFolderPath(path: string | null): void {
+    this.state.explorerFolderPath = path;
+    this.notify();
+  }
+
+  openFileExplorer(path: string): void {
+    this.state.explorerFolderPath = path;
+    this.notify();
+  }
+
+  closeFileExplorer(): void {
+    this.state.explorerFolderPath = null;
     this.notify();
   }
 

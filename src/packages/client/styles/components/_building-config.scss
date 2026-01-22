@@ -63,6 +63,12 @@
     }
   }
 
+  .form-hint {
+    font-size: 0.75rem;
+    color: $text-muted;
+    margin-top: 0.25rem;
+  }
+
   // Building Type Selector
   .building-type-selector {
     display: flex;

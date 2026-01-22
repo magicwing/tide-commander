@@ -6,7 +6,6 @@
  */
 
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import Fuse from 'fuse.js';
 import { useStore, store } from '../../store';
 import { DiffViewer } from '../DiffViewer';
 
@@ -20,7 +19,7 @@ import type {
 } from './types';
 
 // Hooks
-import { useFileTree, flattenTree } from './useFileTree';
+import { useFileTree } from './useFileTree';
 import { useGitStatus, loadGitOriginalContent } from './useGitStatus';
 import { useFileContent } from './useFileContent';
 
@@ -42,6 +41,7 @@ export function FileExplorerPanel({
   areaId,
   onClose,
   onChangeArea,
+  folderPath,
 }: FileExplorerPanelProps) {
   const state = useStore();
 
@@ -49,8 +49,12 @@ export function FileExplorerPanel({
   // AREA & FOLDER STATE
   // -------------------------------------------------------------------------
 
-  const area = areaId ? state.areas.get(areaId) : null;
-  const directories = area?.directories || [];
+  // Check if we're in "direct folder mode" (opened from a folder building)
+  // folderPath takes priority over areaId when both are present
+  const isDirectFolderMode = !!folderPath;
+
+  const area = !isDirectFolderMode && areaId ? state.areas.get(areaId) : null;
+  const directories = isDirectFolderMode ? [folderPath] : (area?.directories || []);
   const allAreas = Array.from(state.areas.values());
 
   const [selectedFolderIndex, setSelectedFolderIndex] = useState(0);
@@ -59,6 +63,11 @@ export function FileExplorerPanel({
   const [showFolderSelector, setShowFolderSelector] = useState(false);
 
   const currentFolder = directories[selectedFolderIndex] || directories[0] || null;
+
+  // Reset folder index when switching modes or folder path changes
+  useEffect(() => {
+    setSelectedFolderIndex(0);
+  }, [folderPath, isDirectFolderMode]);
 
   // Get all folders from all areas for the folder selector
   const allFolders = useMemo<FolderInfo[]>(() => {
@@ -129,34 +138,38 @@ export function FileExplorerPanel({
   // SEARCH
   // -------------------------------------------------------------------------
 
-  // Flatten tree for fuzzy search
-  const flattenedFiles = useMemo(() => flattenTree(tree), [tree]);
-
-  // Fuse.js instance for fuzzy search
-  const fuse = useMemo(() => {
-    return new Fuse(flattenedFiles, {
-      keys: ['name', 'path'],
-      threshold: 0.4,
-      includeScore: true,
-    });
-  }, [flattenedFiles]);
-
-  // Handle search
+  // Handle search using server-side API for full filesystem search
   useEffect(() => {
-    if (!searchQuery.trim()) {
+    if (!searchQuery.trim() || !currentFolder) {
       setSearchResults([]);
       setIsSearching(false);
       return;
     }
 
     setIsSearching(true);
-    const results = fuse
-      .search(searchQuery)
-      .map((r) => r.item)
-      .filter((n) => !n.isDirectory)
-      .slice(0, 20);
-    setSearchResults(results);
-  }, [searchQuery, fuse]);
+
+    // Debounce search requests
+    const timeoutId = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `/api/files/search?path=${encodeURIComponent(currentFolder)}&q=${encodeURIComponent(searchQuery)}&limit=50`
+        );
+        const data = await res.json();
+
+        if (res.ok && data.results) {
+          setSearchResults(data.results);
+        } else {
+          setSearchResults([]);
+        }
+      } catch (err) {
+        console.error('[FileExplorer] Search failed:', err);
+        setSearchResults([]);
+      }
+      setIsSearching(false);
+    }, 200);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery, currentFolder]);
 
   // -------------------------------------------------------------------------
   // EFFECTS
@@ -365,30 +378,43 @@ export function FileExplorerPanel({
   // RENDER
   // -------------------------------------------------------------------------
 
-  if (!isOpen || !area) return null;
+  // Allow rendering if we have an area OR we're in direct folder mode
+  if (!isOpen || (!area && !isDirectFolderMode)) return null;
 
   const gitChangeCount = gitStatus?.files.length || 0;
+
+  // Display name for the header
+  const displayName = isDirectFolderMode
+    ? (folderPath?.split('/').pop() || 'Folder')
+    : (area?.name || 'Explorer');
 
   return (
     <div className="file-explorer-panel ide-style">
       {/* Header */}
       <div className="file-explorer-panel-header">
         <div className="file-explorer-panel-title">
-          {/* Area selector */}
-          <div
-            className="file-explorer-area-selector"
-            onClick={() => allAreas.length > 1 && setShowAreaSelector(!showAreaSelector)}
-            style={{ cursor: allAreas.length > 1 ? 'pointer' : 'default' }}
-          >
-            <span className="file-explorer-panel-dot" style={{ background: area.color }} />
-            <span>{area.name}</span>
-            {allAreas.length > 1 && (
-              <span className="file-explorer-area-dropdown-icon">▼</span>
-            )}
-          </div>
+          {/* Area selector (only shown when we have areas, not in direct folder mode) */}
+          {!isDirectFolderMode && area ? (
+            <div
+              className="file-explorer-area-selector"
+              onClick={() => allAreas.length > 1 && setShowAreaSelector(!showAreaSelector)}
+              style={{ cursor: allAreas.length > 1 ? 'pointer' : 'default' }}
+            >
+              <span className="file-explorer-panel-dot" style={{ background: area.color }} />
+              <span>{area.name}</span>
+              {allAreas.length > 1 && (
+                <span className="file-explorer-area-dropdown-icon">▼</span>
+              )}
+            </div>
+          ) : (
+            <div className="file-explorer-area-selector">
+              <span className="file-explorer-panel-dot" style={{ background: '#ffd700' }} />
+              <span>{displayName}</span>
+            </div>
+          )}
 
-          {/* Folder selector */}
-          {currentFolder && (
+          {/* Folder selector (hide dropdown controls in direct folder mode) */}
+          {currentFolder && !isDirectFolderMode && (
             <>
               <span className="file-explorer-path-separator">/</span>
               <div
@@ -410,8 +436,8 @@ export function FileExplorerPanel({
             <span className="file-explorer-current-file">/ {selectedFile.filename}</span>
           )}
 
-          {/* Area Selector Dropdown */}
-          {showAreaSelector && allAreas.length > 1 && (
+          {/* Area Selector Dropdown (not shown in direct folder mode) */}
+          {!isDirectFolderMode && showAreaSelector && allAreas.length > 1 && (
             <div className="file-explorer-area-dropdown">
               {allAreas.map((a) => (
                 <div
@@ -432,8 +458,8 @@ export function FileExplorerPanel({
             </div>
           )}
 
-          {/* Folder Selector Dropdown */}
-          {showFolderSelector && allFolders.length > 0 && (
+          {/* Folder Selector Dropdown (not shown in direct folder mode) */}
+          {!isDirectFolderMode && showFolderSelector && allFolders.length > 0 && (
             <div className="file-explorer-folder-dropdown">
               {allFolders.map((folder) => (
                 <div
@@ -487,8 +513,8 @@ export function FileExplorerPanel({
             </button>
           </div>
 
-          {/* Folders Section (only in files mode) */}
-          {viewMode === 'files' && (
+          {/* Folders Section (only in files mode, not in direct folder mode) */}
+          {viewMode === 'files' && !isDirectFolderMode && (
             <div className="file-explorer-folders">
               <div className="file-explorer-folders-header">
                 <span className="file-explorer-folders-title">Folders</span>

@@ -55,6 +55,11 @@ export class SceneManager {
   private onAreaDoubleClickCallback: ((areaId: string) => void) | null = null;
   private onBuildingClickCallback: ((buildingId: string) => void) | null = null;
   private onBuildingDoubleClickCallback: ((buildingId: string) => void) | null = null;
+  private onContextMenuCallback: ((
+    screenPos: { x: number; y: number },
+    worldPos: { x: number; z: number },
+    target: { type: 'ground' | 'agent' | 'area' | 'building'; id?: string }
+  ) => void) | null = null;
 
   constructor(canvas: HTMLCanvasElement, selectionBox: HTMLDivElement) {
     this.canvas = canvas;
@@ -101,6 +106,7 @@ export class SceneManager {
         onBuildingDragStart: this.handleBuildingDragStart.bind(this),
         onBuildingDragMove: this.handleBuildingDragMove.bind(this),
         onBuildingDragEnd: this.handleBuildingDragEnd.bind(this),
+        onContextMenu: this.handleContextMenu.bind(this),
       }
     );
 
@@ -665,6 +671,19 @@ export class SceneManager {
     this.onBuildingDoubleClickCallback = callback;
   }
 
+  /**
+   * Set callback for context menu (right-click on ground, agent, area, or building).
+   */
+  setOnContextMenu(
+    callback: (
+      screenPos: { x: number; y: number },
+      worldPos: { x: number; z: number },
+      target: { type: 'ground' | 'agent' | 'area' | 'building'; id?: string }
+    ) => void
+  ): void {
+    this.onContextMenuCallback = callback;
+  }
+
   // ============================================
   // Public API - Config
   // ============================================
@@ -928,6 +947,15 @@ export class SceneManager {
   private handleBuildingDragEnd(buildingId: string, pos: { x: number; z: number }): void {
     // Persist the new position to store and server
     store.updateBuildingPosition(buildingId, pos);
+  }
+
+  // Context menu handler (right-click on ground, agent, area, or building)
+  private handleContextMenu(
+    screenPos: { x: number; y: number },
+    worldPos: { x: number; z: number },
+    target: { type: 'ground' | 'agent' | 'area' | 'building'; id?: string }
+  ): void {
+    this.onContextMenuCallback?.(screenPos, worldPos, target);
   }
 
   // ============================================

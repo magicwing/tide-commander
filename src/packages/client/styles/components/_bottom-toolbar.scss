@@ -1,0 +1,292 @@
+@use '../variables' as *;
+
+.bottom-toolbar {
+  position: fixed;
+  bottom: 72px; // Above the agent bar
+  left: 0;
+  right: $sidebar-width;
+  height: 130px;
+  background: linear-gradient(180deg, rgba($dracula-bg, 0.95) 0%, rgba($dracula-bg-darker, 0.98) 100%);
+  border-top: 1px solid $dracula-current;
+  display: flex;
+  align-items: stretch;
+  padding: 12px 20px;
+  gap: 20px;
+  z-index: 99;
+  backdrop-filter: blur(8px);
+}
+
+// Left: Portrait section with 3D preview
+.bt-portrait-section {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.bt-model-container {
+  width: 100px;
+  height: 115px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: $radius-lg;
+  overflow: hidden;
+  border: 1px solid $dracula-current;
+}
+
+.bt-portrait-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bt-agent-name {
+  font-size: 18px;
+  font-weight: 600;
+  color: $dracula-fg;
+  font-family: $font-mono;
+}
+
+.bt-agent-class {
+  font-size: 11px;
+  color: $dracula-comment;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.bt-agent-area {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.bt-area-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.bt-area-name {
+  font-size: 12px;
+  color: $dracula-fg;
+  font-family: $font-mono;
+}
+
+// Center: Stats section
+.bt-center-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+}
+
+.bt-stats-bar {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+}
+
+.bt-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bt-stat-label {
+  font-size: 9px;
+  color: $dracula-comment;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.bt-stat-value {
+  font-size: 14px;
+  font-weight: 600;
+  font-family: $font-mono;
+  color: $dracula-fg;
+}
+
+.bt-context-bar {
+  width: 80px;
+  height: 8px;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-right: 8px;
+}
+
+.bt-context-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width $transition-slow, background $transition-slow;
+}
+
+.bt-cwd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba($dracula-bg-darker, 0.6);
+  border-radius: $radius-sm;
+  border: 1px solid rgba($dracula-current, 0.5);
+}
+
+.bt-cwd-label {
+  font-size: 10px;
+  color: $dracula-comment;
+  text-transform: uppercase;
+}
+
+.bt-cwd-path {
+  font-size: 12px;
+  font-family: $font-mono;
+  color: $dracula-cyan;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+// Area directories section
+.bt-directories-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 200px;
+  max-width: 280px;
+}
+
+.bt-directories-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bt-directories-label {
+  font-size: 9px;
+  color: $dracula-comment;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.bt-directories-count {
+  font-size: 9px;
+  color: $dracula-purple;
+  background: rgba($dracula-purple, 0.2);
+  padding: 1px 5px;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.bt-directories-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  max-height: 80px;
+  padding-right: 4px;
+
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: $dracula-current;
+    border-radius: 2px;
+  }
+}
+
+.bt-directory-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: rgba($dracula-current, 0.3);
+  border-radius: $radius-sm;
+  font-size: 11px;
+  font-family: $font-mono;
+  color: $dracula-green;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: all $transition-fast;
+
+  &:hover {
+    background: rgba($dracula-green, 0.15);
+    border-left: 2px solid $dracula-green;
+    padding-left: 6px;
+  }
+}
+
+.bt-directory-icon {
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.bt-directory-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bt-directories-empty {
+  font-size: 10px;
+  color: $dracula-comment;
+  font-style: italic;
+  padding: 8px;
+}
+
+// Right: Actions section
+.bt-actions-section {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.bt-action-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 60px;
+  height: 60px;
+  background: rgba($dracula-current, 0.4);
+  border: 1px solid $dracula-current;
+  border-radius: $radius-lg;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    background: rgba($dracula-purple, 0.2);
+    border-color: $dracula-purple;
+    transform: translateY(-2px);
+  }
+
+  &.bt-action-danger:hover {
+    background: rgba($dracula-red, 0.2);
+    border-color: $dracula-red;
+  }
+}
+
+.bt-action-icon {
+  font-size: 20px;
+}
+
+.bt-action-label {
+  font-size: 10px;
+  color: $dracula-fg;
+  font-family: $font-mono;
+}
+
+.bt-action-hotkey {
+  font-size: 9px;
+  color: $dracula-comment;
+  font-family: $font-mono;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 1px 4px;
+  border-radius: 2px;
+}

@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState, useCallback, Profiler } from 'react';
-import { store, useStore, useMobileView } from './store';
+import React, { useEffect, useRef, useState, useCallback, useMemo, Profiler } from 'react';
+import { store, useStore, useMobileView, useExplorerFolderPath } from './store';
 import { connect, setCallbacks, getSocket } from './websocket';
 import { SceneManager } from './scene/SceneManager';
 import { ToastProvider, useToast } from './components/Toast';
@@ -22,7 +22,8 @@ import { matchesShortcut } from './store/shortcuts';
 import { FPSMeter } from './components/FPSMeter';
 import { profileRender } from './utils/profiling';
 import { STORAGE_KEYS, getStorage, setStorage, getStorageString } from './utils/storage';
-import { useModalState, useModalStateWithId } from './hooks';
+import { useModalState, useModalStateWithId, useContextMenu } from './hooks';
+import { ContextMenu, type ContextMenuAction } from './components/ContextMenu';
 
 // Persist scene manager across HMR
 let persistedScene: SceneManager | null = null;
@@ -98,6 +99,9 @@ function AppContent() {
   const skillsModal = useModalState();
   const buildingModal = useModalState<string | null>(); // data = editingBuildingId (null for new)
   const explorerModal = useModalStateWithId(); // has .id for areaId
+  const explorerFolderPath = useExplorerFolderPath(); // Direct folder path for file explorer (from store)
+  const contextMenu = useContextMenu(); // Right-click context menu
+  const [spawnPosition, setSpawnPosition] = useState<{ x: number; z: number } | null>(null);
 
   const [sceneConfig, setSceneConfig] = useState(loadConfig);
   const [sidebarOpen, setSidebarOpen] = useState(false); // Mobile sidebar state
@@ -172,9 +176,21 @@ function AppContent() {
     });
 
     // Set up building click callback - open toolbox when building is clicked
+    // For folder buildings, open file explorer instead
     sceneRef.current?.setOnBuildingClick((buildingId) => {
       store.selectBuilding(buildingId);
-      toolboxModal.open();
+      const building = store.getState().buildings.get(buildingId);
+      if (building?.type === 'folder' && building.folderPath) {
+        // Open file explorer with the folder path
+        store.openFileExplorer(building.folderPath);
+      } else {
+        toolboxModal.open();
+      }
+    });
+
+    // Set up context menu callback (right-click on ground, agent, area, or building)
+    sceneRef.current?.setOnContextMenu((screenPos, worldPos, target) => {
+      contextMenu.open(screenPos, worldPos, target);
     });
 
     // Set up websocket callbacks (always update refs)
@@ -352,6 +368,210 @@ function AppContent() {
     showToast('info', 'Agents Removed', `${selectedIds.length} agent(s) removed from view`);
   }, [state.selectedAgentIds, showToast, deleteConfirmModal]);
 
+  // Context menu actions - build dynamically based on what was clicked
+  const contextMenuActions: ContextMenuAction[] = useMemo(() => {
+    const worldPos = contextMenu.worldPosition;
+    const target = contextMenu.target;
+    const actions: ContextMenuAction[] = [];
+
+    // Agent-specific actions
+    if (target.type === 'agent' && target.id) {
+      const agent = state.agents.get(target.id);
+      if (agent) {
+        actions.push({
+          id: 'select-agent',
+          label: `Select ${agent.name}`,
+          icon: '👆',
+          onClick: () => {
+            store.selectAgent(target.id!);
+            sceneRef.current?.refreshSelectionVisuals();
+          },
+        });
+        actions.push({
+          id: 'focus-agent',
+          label: 'Focus Camera',
+          icon: '🎯',
+          onClick: () => {
+            sceneRef.current?.focusAgent(target.id!);
+          },
+        });
+        actions.push({
+          id: 'open-terminal',
+          label: 'Open Terminal',
+          icon: '💬',
+          onClick: () => {
+            store.selectAgent(target.id!);
+            store.setTerminalOpen(true);
+          },
+        });
+        actions.push({ id: 'divider-agent', label: '', divider: true, onClick: () => {} });
+        actions.push({
+          id: 'delete-agent',
+          label: `Remove ${agent.name}`,
+          icon: '🗑️',
+          danger: true,
+          onClick: () => {
+            store.removeAgentFromServer(target.id!);
+            sceneRef.current?.removeAgent(target.id!);
+            showToast('info', 'Agent Removed', `${agent.name} removed from view`);
+          },
+        });
+        return actions;
+      }
+    }
+
+    // Area-specific actions
+    if (target.type === 'area' && target.id) {
+      const area = state.areas.get(target.id);
+      if (area) {
+        actions.push({
+          id: 'select-area',
+          label: `Select "${area.name}"`,
+          icon: '📐',
+          onClick: () => {
+            store.selectArea(target.id!);
+            toolboxModal.open();
+          },
+        });
+        if (area.directories && area.directories.length > 0) {
+          actions.push({
+            id: 'open-explorer',
+            label: 'Open File Explorer',
+            icon: '📁',
+            onClick: () => {
+              explorerModal.open(target.id!);
+            },
+          });
+        }
+        actions.push({ id: 'divider-area', label: '', divider: true, onClick: () => {} });
+        actions.push({
+          id: 'delete-area',
+          label: `Delete "${area.name}"`,
+          icon: '🗑️',
+          danger: true,
+          onClick: () => {
+            store.deleteArea(target.id!);
+            sceneRef.current?.syncAreas();
+            showToast('info', 'Area Deleted', `"${area.name}" has been deleted`);
+          },
+        });
+        return actions;
+      }
+    }
+
+    // Building-specific actions
+    if (target.type === 'building' && target.id) {
+      const building = state.buildings.get(target.id);
+      if (building) {
+        actions.push({
+          id: 'select-building',
+          label: `Select "${building.name}"`,
+          icon: '🏢',
+          onClick: () => {
+            store.selectBuilding(target.id!);
+            toolboxModal.open();
+          },
+        });
+        actions.push({
+          id: 'edit-building',
+          label: 'Edit Building',
+          icon: '✏️',
+          onClick: () => {
+            buildingModal.open(target.id!);
+          },
+        });
+        if (building.type === 'folder' && building.folderPath) {
+          actions.push({
+            id: 'open-folder',
+            label: 'Open Folder',
+            icon: '📁',
+            onClick: () => {
+              store.openFileExplorer(building.folderPath!);
+            },
+          });
+        }
+        actions.push({ id: 'divider-building', label: '', divider: true, onClick: () => {} });
+        actions.push({
+          id: 'delete-building',
+          label: `Delete "${building.name}"`,
+          icon: '🗑️',
+          danger: true,
+          onClick: () => {
+            store.deleteBuilding(target.id!);
+            sceneRef.current?.syncBuildings();
+            showToast('info', 'Building Deleted', `"${building.name}" has been deleted`);
+          },
+        });
+        return actions;
+      }
+    }
+
+    // Ground actions (default) - spawn, draw, etc.
+    actions.push({
+      id: 'spawn-agent',
+      label: 'Spawn Agent Here',
+      icon: '🤖',
+      shortcut: 'N',
+      onClick: () => {
+        setSpawnPosition(worldPos);
+        spawnModal.open();
+      },
+    });
+    actions.push({
+      id: 'spawn-boss',
+      label: 'Spawn Boss Here',
+      icon: '👑',
+      onClick: () => {
+        setSpawnPosition(worldPos);
+        bossSpawnModal.open();
+      },
+    });
+    actions.push({ id: 'divider-1', label: '', divider: true, onClick: () => {} });
+    actions.push({
+      id: 'draw-area',
+      label: 'Draw Area',
+      icon: '📐',
+      onClick: () => {
+        sceneRef.current?.setDrawingTool('rectangle');
+      },
+    });
+    actions.push({
+      id: 'new-building',
+      label: 'Place Building',
+      icon: '🏢',
+      onClick: () => {
+        buildingModal.open(null);
+      },
+    });
+    actions.push({ id: 'divider-2', label: '', divider: true, onClick: () => {} });
+    actions.push({
+      id: 'open-settings',
+      label: 'Settings',
+      icon: '⚙️',
+      onClick: () => {
+        toolboxModal.open();
+      },
+    });
+    actions.push({
+      id: 'open-commander',
+      label: 'Commander View',
+      icon: '📊',
+      shortcut: '⌘K',
+      onClick: () => {
+        commanderModal.open();
+      },
+    });
+
+    return actions;
+  }, [contextMenu.worldPosition, contextMenu.target, state.agents, state.areas, state.buildings, spawnModal, bossSpawnModal, buildingModal, toolboxModal, commanderModal, explorerModal, showToast]);
+
+  // Clear spawn position when spawn modals close
+  useEffect(() => {
+    if (!spawnModal.isOpen && !bossSpawnModal.isOpen) {
+      setSpawnPosition(null);
+    }
+  }, [spawnModal.isOpen, bossSpawnModal.isOpen]);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -425,8 +645,6 @@ function AppContent() {
             .filter(a => a.directories && a.directories.length > 0);
           if (areasWithDirs.length > 0) {
             explorerModal.open(areasWithDirs[0].id);
-            // Close terminal when opening file explorer
-            store.setTerminalOpen(false);
           }
         }
         return;
@@ -574,6 +792,7 @@ function AppContent() {
         onClose={spawnModal.close}
         onSpawnStart={() => {}}
         onSpawnEnd={() => {}}
+        spawnPosition={spawnPosition}
       />
 
       <BossSpawnModal
@@ -581,6 +800,7 @@ function AppContent() {
         onClose={bossSpawnModal.close}
         onSpawnStart={() => {}}
         onSpawnEnd={() => {}}
+        spawnPosition={spawnPosition}
       />
 
       <SubordinateAssignmentModal
@@ -679,9 +899,13 @@ function AppContent() {
 
       {/* File Explorer Panel (right side) */}
       <FileExplorerPanel
-        isOpen={explorerModal.isOpen}
+        isOpen={explorerModal.isOpen || explorerFolderPath !== null}
         areaId={explorerModal.id}
-        onClose={explorerModal.close}
+        folderPath={explorerFolderPath}
+        onClose={() => {
+          explorerModal.close();
+          store.closeFileExplorer();
+        }}
       />
 
       {/* Bottom Agent Bar */}
@@ -714,6 +938,15 @@ function AppContent() {
       <SkillsPanel
         isOpen={skillsModal.isOpen}
         onClose={skillsModal.close}
+      />
+
+      {/* Right-click Context Menu */}
+      <ContextMenu
+        isOpen={contextMenu.isOpen}
+        position={contextMenu.screenPosition}
+        worldPosition={contextMenu.worldPosition}
+        actions={contextMenuActions}
+        onClose={contextMenu.close}
       />
     </div>
   );

@@ -485,7 +485,7 @@
   border-left: 1px solid $border-color;
   display: flex;
   flex-direction: column;
-  z-index: 100;
+  z-index: 250; // Higher than guake terminal (200) so it appears on top
 
   &.ide-style {
     left: 0;

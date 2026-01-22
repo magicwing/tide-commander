@@ -73,6 +73,8 @@ export interface FileExplorerPanelProps {
   areaId: string | null;
   onClose: () => void;
   onChangeArea?: (areaId: string) => void;
+  // Direct folder path (for opening without an area, e.g., from folder buildings)
+  folderPath?: string | null;
 }
 
 export interface TreeNodeProps {
@@ -81,7 +83,7 @@ export interface TreeNodeProps {
   selectedPath: string | null;
   expandedPaths: Set<string>;
   onSelect: (node: TreeNode) => void;
-  onToggle: (path: string) => void;
+  onToggle: (path: string) => void | Promise<void>;
   searchQuery: string;
 }
 
@@ -126,7 +128,7 @@ export interface UseFileTreeReturn {
   loading: boolean;
   expandedPaths: Set<string>;
   loadTree: () => Promise<void>;
-  togglePath: (path: string) => void;
+  togglePath: (path: string) => void | Promise<void>;
   setExpandedPaths: React.Dispatch<React.SetStateAction<Set<string>>>;
 }
 

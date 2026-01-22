@@ -460,14 +460,41 @@ export class InputHandler {
     const groundPos = this.raycaster.raycastGroundFromEvent(event);
 
     if (groundPos) {
-      if (state.selectedAgentIds.size > 0 && this.callbacks.onAreaRightClick) {
-        this.callbacks.onAreaRightClick(groundPos);
-      }
-
+      // If agents are selected, right-click moves them (no context menu)
       if (state.selectedAgentIds.size > 0) {
+        if (this.callbacks.onAreaRightClick) {
+          this.callbacks.onAreaRightClick(groundPos);
+        }
+
         const agentIds = Array.from(state.selectedAgentIds);
         const point = new THREE.Vector3(groundPos.x, 0, groundPos.z);
         this.callbacks.onMoveCommand(point, agentIds);
+        return;
+      }
+
+      // No agents selected - show context menu with target information
+      if (this.callbacks.onContextMenu) {
+        const agentAtPos = this.raycaster.findAgentAtPosition(event);
+        const areaAtPos = this.areaAtPositionGetter?.(groundPos);
+        const buildingAtPos = this.buildingAtPositionGetter?.(groundPos);
+
+        let target: { type: 'ground' | 'agent' | 'area' | 'building'; id?: string };
+
+        if (agentAtPos) {
+          target = { type: 'agent', id: agentAtPos };
+        } else if (buildingAtPos) {
+          target = { type: 'building', id: buildingAtPos.id };
+        } else if (areaAtPos) {
+          target = { type: 'area', id: areaAtPos.id };
+        } else {
+          target = { type: 'ground' };
+        }
+
+        this.callbacks.onContextMenu(
+          { x: event.clientX, y: event.clientY },
+          groundPos,
+          target
+        );
       }
     }
   };

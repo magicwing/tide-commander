@@ -20,6 +20,8 @@ interface SpawnModalProps {
   onClose: () => void;
   onSpawnStart: () => void;
   onSpawnEnd: () => void;
+  /** Optional spawn position - if provided, agent spawns at this location */
+  spawnPosition?: { x: number; z: number } | null;
 }
 
 /**
@@ -35,7 +37,7 @@ function getRandomLotrName(usedNames: Set<string>): string {
   return availableNames[Math.floor(Math.random() * availableNames.length)];
 }
 
-export function SpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: SpawnModalProps) {
+export function SpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd, spawnPosition }: SpawnModalProps) {
   const agents = useAgents();
   const skills = useSkillsArray();
   const customClasses = useCustomAgentClassesArray();
@@ -214,7 +216,7 @@ export function SpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: SpawnM
       model: selectedModel
     });
 
-    store.spawnAgent(name.trim(), selectedClass, effectiveCwd.trim(), undefined, selectedSessionId || undefined, useChrome, permissionMode, initialSkillIds, selectedModel);
+    store.spawnAgent(name.trim(), selectedClass, effectiveCwd.trim(), spawnPosition || undefined, selectedSessionId || undefined, useChrome, permissionMode, initialSkillIds, selectedModel);
   };
 
   const handleSuccess = () => {

@@ -948,15 +948,6 @@ function AboutSection() {
           <span className="about-link-icon">📦</span>
           <span>GitHub Repository</span>
         </a>
-        <a
-          href="https://x.com/Deivid11"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="about-link"
-        >
-          <span className="about-link-icon">𝕏</span>
-          <span>@Deivid11</span>
-        </a>
       </div>
 
       <div className="about-credits">

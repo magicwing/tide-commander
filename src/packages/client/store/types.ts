@@ -131,6 +131,8 @@ export interface StoreState {
   fileViewerPath: string | null;
   // File viewer edit data for diff view (old_string, new_string from Edit tool)
   fileViewerEditData: { oldString: string; newString: string } | null;
+  // File explorer folder path (to open file explorer from other components)
+  explorerFolderPath: string | null;
   // Context modal agent ID (to open context modal from other components)
   contextModalAgentId: string | null;
   // Supervisor state

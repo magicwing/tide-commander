@@ -2,12 +2,16 @@
  * useFileTree - Custom hook for file tree management
  *
  * Handles loading, caching, and navigation of file tree data.
- * Following ClaudeOutputPanel's useTerminalInput pattern.
+ * Supports lazy loading - directories load children on-demand when expanded.
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import type { TreeNode, UseFileTreeReturn } from './types';
-import { DEFAULT_TREE_DEPTH } from './constants';
+
+// Initial depth to load (shallow for fast initial load)
+const INITIAL_DEPTH = 3;
+// Depth to load when expanding a folder
+const EXPAND_DEPTH = 3;
 
 /**
  * Hook for managing file tree state and operations
@@ -16,6 +20,24 @@ export function useFileTree(currentFolder: string | null): UseFileTreeReturn {
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [loading, setLoading] = useState(false);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
+  const [loadedPaths, setLoadedPaths] = useState<Set<string>>(new Set());
+
+  // Use refs to access current state in callbacks without stale closures
+  const treeRef = useRef(tree);
+  const loadedPathsRef = useRef(loadedPaths);
+  const expandedPathsRef = useRef(expandedPaths);
+
+  useEffect(() => {
+    treeRef.current = tree;
+  }, [tree]);
+
+  useEffect(() => {
+    loadedPathsRef.current = loadedPaths;
+  }, [loadedPaths]);
+
+  useEffect(() => {
+    expandedPathsRef.current = expandedPaths;
+  }, [expandedPaths]);
 
   /**
    * Load tree structure for the current folder
@@ -27,7 +49,7 @@ export function useFileTree(currentFolder: string | null): UseFileTreeReturn {
 
     try {
       const res = await fetch(
-        `/api/files/tree?path=${encodeURIComponent(currentFolder)}&depth=${DEFAULT_TREE_DEPTH}`
+        `/api/files/tree?path=${encodeURIComponent(currentFolder)}&depth=${INITIAL_DEPTH}`
       );
       const data = await res.json();
 
@@ -42,8 +64,26 @@ export function useFileTree(currentFolder: string | null): UseFileTreeReturn {
           children: data.tree,
         };
         setTree([rootNode]);
-        // Auto-expand root
-        setExpandedPaths(new Set([currentFolder]));
+        // Track that we've loaded this path
+        const loaded = new Set<string>([currentFolder]);
+        collectLoadedPaths(data.tree, loaded);
+        setLoadedPaths(loaded);
+
+        // Auto-expand root and first two levels of subdirectories
+        const pathsToExpand = new Set<string>([currentFolder]);
+        for (const child of data.tree) {
+          if (child.isDirectory) {
+            pathsToExpand.add(child.path);
+            if (child.children) {
+              for (const grandchild of child.children) {
+                if (grandchild.isDirectory) {
+                  pathsToExpand.add(grandchild.path);
+                }
+              }
+            }
+          }
+        }
+        setExpandedPaths(pathsToExpand);
       }
     } catch (err) {
       console.error('[FileExplorer] Failed to load tree:', err);
@@ -54,19 +94,86 @@ export function useFileTree(currentFolder: string | null): UseFileTreeReturn {
   }, [currentFolder]);
 
   /**
-   * Toggle expansion state of a path
+   * Load children for a specific directory path (lazy loading)
    */
-  const togglePath = useCallback((path: string) => {
-    setExpandedPaths((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) {
-        next.delete(path);
-      } else {
-        next.add(path);
+  const loadChildren = useCallback(async (dirPath: string) => {
+    try {
+      const res = await fetch(
+        `/api/files/tree?path=${encodeURIComponent(dirPath)}&depth=${EXPAND_DEPTH}`
+      );
+      const data = await res.json();
+
+      if (res.ok && data.tree) {
+        // Update the tree by finding the node and setting its children
+        setTree((prevTree) => {
+          const newTree = JSON.parse(JSON.stringify(prevTree)) as TreeNode[];
+          const node = findNodeByPath(newTree, dirPath);
+          if (node) {
+            node.children = data.tree;
+          }
+          return newTree;
+        });
+
+        // Track loaded paths
+        setLoadedPaths((prev) => {
+          const next = new Set(prev);
+          next.add(dirPath);
+          collectLoadedPaths(data.tree, next);
+          return next;
+        });
       }
-      return next;
-    });
+    } catch (err) {
+      console.error('[FileExplorer] Failed to load children:', err);
+    }
   }, []);
+
+  /**
+   * Toggle expansion state of a path - loads children if needed
+   * Uses refs to avoid stale closures and keep the function stable
+   */
+  const togglePath = useCallback(async (path: string) => {
+    console.log('[FileTree] togglePath called:', path);
+
+    // Use ref to get current expansion state (avoids stale closure)
+    const isCurrentlyExpanded = expandedPathsRef.current.has(path);
+    console.log('[FileTree] isCurrentlyExpanded:', isCurrentlyExpanded);
+
+    if (isCurrentlyExpanded) {
+      // Collapsing - just update expanded paths
+      console.log('[FileTree] Collapsing');
+      setExpandedPaths((prev) => {
+        const next = new Set(prev);
+        next.delete(path);
+        return next;
+      });
+    } else {
+      // Expanding - first expand, then load if needed
+      console.log('[FileTree] Expanding');
+      setExpandedPaths((prev) => {
+        const next = new Set(prev);
+        next.add(path);
+        return next;
+      });
+
+      // Check if we need to load children (using refs for current state)
+      const currentTree = treeRef.current;
+      const currentLoadedPaths = loadedPathsRef.current;
+      const node = findNodeByPath(currentTree, path);
+
+      console.log('[FileTree] Node found:', !!node, node?.isDirectory ? 'isDirectory' : 'isFile');
+      console.log('[FileTree] loadedPaths has path:', currentLoadedPaths.has(path));
+      console.log('[FileTree] loadedPaths size:', currentLoadedPaths.size);
+
+      if (node && node.isDirectory) {
+        const needsLoad = !currentLoadedPaths.has(path);
+        console.log('[FileTree] needsLoad:', needsLoad);
+        if (needsLoad) {
+          console.log('[FileTree] Calling loadChildren for:', path);
+          await loadChildren(path);
+        }
+      }
+    }
+  }, [loadChildren]); // Only depends on loadChildren which is stable
 
   return {
     tree,
@@ -76,6 +183,37 @@ export function useFileTree(currentFolder: string | null): UseFileTreeReturn {
     togglePath,
     setExpandedPaths,
   };
+}
+
+/**
+ * Find a node in the tree by its path
+ */
+function findNodeByPath(nodes: TreeNode[], targetPath: string): TreeNode | null {
+  for (const node of nodes) {
+    if (node.path === targetPath) {
+      return node;
+    }
+    if (node.children) {
+      const found = findNodeByPath(node.children, targetPath);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+/**
+ * Collect directory paths that have been fully loaded (have children with content)
+ * Directories at the edge of loading (empty children) are NOT marked as loaded
+ * so they can trigger lazy loading when expanded.
+ */
+function collectLoadedPaths(nodes: TreeNode[], paths: Set<string>): void {
+  for (const node of nodes) {
+    if (node.isDirectory && node.children && node.children.length > 0) {
+      // Only mark as loaded if it has actual children
+      paths.add(node.path);
+      collectLoadedPaths(node.children, paths);
+    }
+  }
 }
 
 // ============================================================================

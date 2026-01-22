@@ -12,6 +12,8 @@ interface BossSpawnModalProps {
   onClose: () => void;
   onSpawnStart: () => void;
   onSpawnEnd: () => void;
+  /** Optional spawn position - if provided, agent spawns at this location */
+  spawnPosition?: { x: number; z: number } | null;
 }
 
 /**
@@ -26,7 +28,7 @@ function getRandomBossName(usedNames: Set<string>): string {
   return `Boss ${availableNames[Math.floor(Math.random() * availableNames.length)]}`;
 }
 
-export function BossSpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: BossSpawnModalProps) {
+export function BossSpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd, spawnPosition }: BossSpawnModalProps) {
   const { agents } = useStore();
   const customClasses = useCustomAgentClassesArray();
   const [name, setName] = useState('');
@@ -108,7 +110,7 @@ export function BossSpawnModal({ isOpen, onClose, onSpawnStart, onSpawnEnd }: Bo
       name.trim(),
       selectedClass,
       cwd.trim(),
-      undefined,
+      spawnPosition || undefined,
       Array.from(selectedSubordinates),
       useChrome,
       permissionMode,

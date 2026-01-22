@@ -28,6 +28,20 @@ export interface InputCallbacks {
   onBuildingDragStart?: (buildingId: string, pos: { x: number; z: number }) => void;
   onBuildingDragMove?: (buildingId: string, pos: { x: number; z: number }) => void;
   onBuildingDragEnd?: (buildingId: string, pos: { x: number; z: number }) => void;
+  // Context menu callback (right-click on ground, agent, area, or building)
+  onContextMenu?: (
+    screenPos: { x: number; y: number },
+    worldPos: { x: number; z: number },
+    target: ContextMenuTarget
+  ) => void;
+}
+
+/**
+ * Target information for context menu.
+ */
+export interface ContextMenuTarget {
+  type: 'ground' | 'agent' | 'area' | 'building';
+  id?: string; // Agent ID, Area ID, or Building ID
 }
 
 /**

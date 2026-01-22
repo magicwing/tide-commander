@@ -196,6 +196,28 @@ export function AgentBar({ onFocusAgent, onSpawnClick, onSpawnBossClick, onNewBu
                 </span>
               </div>
 
+              {/* Area folders */}
+              {group.area?.directories && group.area.directories.length > 0 && (
+                <div className="agent-bar-folders">
+                  {group.area.directories.map((dir, idx) => (
+                    <div
+                      key={idx}
+                      className="agent-bar-folder-item"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        store.openFileExplorer(dir);
+                      }}
+                    >
+                      <span className="agent-bar-folder-icon">📁</span>
+                      <div className="agent-bar-folder-tooltip">
+                        <div className="agent-bar-folder-tooltip-path">{dir}</div>
+                        <div className="agent-bar-folder-tooltip-hint">Click to open</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* Agents in this group */}
               {groupAgents.map((agent) => {
                 const currentIndex = globalIndex++;

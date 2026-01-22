@@ -513,6 +513,13 @@ export function useFileViewerEditData(): { oldString: string; newString: string 
 }
 
 /**
+ * Get file explorer folder path. Only re-renders when it changes.
+ */
+export function useExplorerFolderPath(): string | null {
+  return useSelector(useCallback((state: StoreState) => state.explorerFolderPath, []));
+}
+
+/**
  * Get context modal agent ID. Only re-renders when it changes.
  */
 export function useContextModalAgentId(): string | null {
