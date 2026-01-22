@@ -765,17 +765,119 @@
 
 // Agent edit modal
 .agent-edit-modal {
-  width: 480px;
+  width: 560px;
   max-width: 95vw;
-  max-height: 90vh;
+  max-height: 85vh;
   display: flex;
   flex-direction: column;
+  padding: 0;
 
-  .modal-body {
-    flex: 1;
-    overflow-y: auto;
-    min-height: 0;
+  .modal-header {
+    padding: 14px 20px;
+    margin-bottom: 0;
+    border-bottom: 1px solid $border-color;
+    font-size: 16px;
   }
+
+  .modal-footer {
+    padding: 12px 20px;
+    border-top: 1px solid $border-color;
+    justify-content: flex-end;
+  }
+}
+
+// Custom class instructions notice
+.custom-class-notice {
+  padding: 10px 12px;
+  background: rgba($dracula-cyan, 0.1);
+  border: 1px solid rgba($dracula-cyan, 0.3);
+  border-radius: $radius-sm;
+  font-size: 12px;
+}
+
+.custom-class-notice-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: $dracula-cyan;
+  font-weight: 500;
+}
+
+.custom-class-notice-info {
+  margin-top: 4px;
+  font-size: 11px;
+  color: $text-secondary;
+}
+
+// Model change warning
+.model-change-warning {
+  padding: 8px 10px;
+  background: rgba($accent-orange, 0.15);
+  border: 1px solid rgba($accent-orange, 0.3);
+  border-radius: $radius-sm;
+  font-size: 11px;
+  color: $accent-orange;
+}
+
+// Compact skills chips for edit modal
+.skills-chips-compact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.skills-empty {
+  padding: 12px;
+  text-align: center;
+  color: $text-muted;
+  font-size: 11px;
+}
+
+.skill-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  background: $bg-secondary;
+  border: 1px solid $border-color;
+  border-radius: 100px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all $transition-fast;
+  color: $text-secondary;
+
+  &:hover {
+    border-color: $text-secondary;
+  }
+
+  &.selected {
+    border-color: $dracula-green;
+    background: rgba($dracula-green, 0.15);
+    color: $dracula-green;
+  }
+
+  &.class-based {
+    cursor: default;
+    opacity: 0.8;
+  }
+}
+
+.skill-check {
+  font-size: 11px;
+}
+
+.skill-chip-name {
+  font-weight: 500;
+}
+
+.skill-chip-badge {
+  font-size: 9px;
+  padding: 1px 5px;
+  background: rgba($text-secondary, 0.2);
+  border-radius: 3px;
+  color: $text-muted;
 }
 
 // Context view modal

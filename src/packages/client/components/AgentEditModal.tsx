@@ -174,227 +174,152 @@ export function AgentEditModal({ agent, isOpen, onClose }: AgentEditModalProps) 
           Edit Agent: {agent.name}
         </div>
 
-        <div className="modal-body" style={{ padding: '16px' }}>
-          {/* Class Selection */}
-          <div className="form-section" style={{ marginBottom: '16px' }}>
-            <label className="form-label">Agent Class</label>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '16px',
-            }}>
-              <div style={{ flexShrink: 0 }}>
-                <ModelPreview
-                  agentClass={previewAgentClass}
-                  modelFile={previewModelFile}
-                  width={80}
-                  height={100}
-                />
-              </div>
-              <div style={{ flex: 1 }}>
-                <select
-                  className="form-input"
-                  value={selectedClass}
-                  onChange={(e) => setSelectedClass(e.target.value)}
-                  style={{ width: '100%', marginBottom: '8px' }}
-                >
-                  <optgroup label="Built-in Classes">
-                    {Object.entries(BUILT_IN_AGENT_CLASSES)
-                      .filter(([key]) => key !== 'boss')
-                      .map(([key, config]) => (
-                        <option key={key} value={key}>
-                          {config.icon} {key.charAt(0).toUpperCase() + key.slice(1)}
-                        </option>
-                      ))}
-                  </optgroup>
-                  {customClasses.length > 0 && (
-                    <optgroup label="Custom Classes">
-                      {customClasses.map(cc => (
-                        <option key={cc.id} value={cc.id}>
-                          {cc.icon} {cc.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                </select>
-                <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                  {BUILT_IN_AGENT_CLASSES[selectedClass as BuiltInAgentClass]?.description ||
-                    customClasses.find(c => c.id === selectedClass)?.description ||
-                    'Custom agent class'}
-                </div>
+        <div className="modal-body spawn-modal-body">
+          {/* Top: Preview + Class Selection */}
+          <div className="spawn-top-section">
+            <div className="spawn-preview-compact">
+              <ModelPreview
+                agentClass={previewAgentClass}
+                modelFile={previewModelFile}
+                width={100}
+                height={120}
+              />
+            </div>
+            <div className="spawn-class-section">
+              <div className="spawn-class-label">Agent Class</div>
+              <div className="class-selector-inline">
+                {customClasses.map((customClass) => (
+                  <button
+                    key={customClass.id}
+                    className={`class-chip ${selectedClass === customClass.id ? 'selected' : ''}`}
+                    onClick={() => setSelectedClass(customClass.id)}
+                    title={customClass.description}
+                  >
+                    <span className="class-chip-icon">{customClass.icon}</span>
+                    <span className="class-chip-name">{customClass.name}</span>
+                  </button>
+                ))}
+                {Object.entries(BUILT_IN_AGENT_CLASSES)
+                  .filter(([key]) => key !== 'boss')
+                  .map(([key, config]) => (
+                    <button
+                      key={key}
+                      className={`class-chip ${selectedClass === key ? 'selected' : ''}`}
+                      onClick={() => setSelectedClass(key as AgentClass)}
+                      title={config.description}
+                    >
+                      <span className="class-chip-icon">{config.icon}</span>
+                      <span className="class-chip-name">{key.charAt(0).toUpperCase() + key.slice(1)}</span>
+                    </button>
+                  ))}
               </div>
             </div>
           </div>
 
           {/* Custom Class Instructions Notice */}
           {selectedCustomClass?.instructions && (
-            <div style={{
-              marginBottom: '16px',
-              padding: '10px 12px',
-              background: 'rgba(139, 233, 253, 0.1)',
-              border: '1px solid rgba(139, 233, 253, 0.3)',
-              borderRadius: '6px',
-              fontSize: '12px',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--accent-cyan)' }}>
+            <div className="custom-class-notice">
+              <div className="custom-class-notice-header">
                 <span>📋</span>
-                <span style={{ fontWeight: 500 }}>This class has custom instructions</span>
+                <span>This class has custom instructions</span>
               </div>
-              <div style={{ marginTop: '6px', color: 'var(--text-secondary)', fontSize: '11px' }}>
+              <div className="custom-class-notice-info">
                 {selectedCustomClass.instructions.length} characters of CLAUDE.md instructions will be injected as system prompt
               </div>
             </div>
           )}
 
-          {/* Permission Mode */}
-          <div className="form-section" style={{ marginBottom: '16px' }}>
-            <label className="form-label">Permission Mode</label>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              {(Object.entries(PERMISSION_MODES) as [PermissionMode, { label: string; description: string }][]).map(
-                ([mode, config]) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    className={`btn ${permissionMode === mode ? 'btn-primary' : 'btn-secondary'}`}
-                    onClick={() => setPermissionMode(mode)}
-                    style={{ flex: 1, padding: '8px 12px' }}
-                    title={config.description}
-                  >
-                    {mode === 'bypass' ? '⚡' : '🔐'} {config.label}
-                  </button>
-                )
-              )}
-            </div>
-            <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-              {PERMISSION_MODES[permissionMode].description}
-            </div>
-          </div>
-
-          {/* Model Selection */}
-          <div className="form-section" style={{ marginBottom: '16px' }}>
-            <label className="form-label">Claude Model</label>
-            <div className="model-selector">
-              {(Object.keys(CLAUDE_MODELS) as ClaudeModel[]).map((model) => (
-                <div
-                  key={model}
-                  className={`model-option ${selectedModel === model ? 'selected' : ''}`}
-                  onClick={() => setSelectedModel(model)}
-                >
-                  <div className="model-icon">{CLAUDE_MODELS[model].icon}</div>
-                  <div className="model-info">
-                    <div className="model-label">{CLAUDE_MODELS[model].label}</div>
-                    <div className="model-desc">{CLAUDE_MODELS[model].description}</div>
-                  </div>
+          {/* Form Fields */}
+          <div className="spawn-form-section">
+            {/* Row 1: Model + Permission */}
+            <div className="spawn-form-row">
+              <div className="spawn-field">
+                <label className="spawn-label">Model</label>
+                <div className="spawn-select-row">
+                  {(Object.keys(CLAUDE_MODELS) as ClaudeModel[]).map((model) => (
+                    <button
+                      key={model}
+                      className={`spawn-select-btn ${selectedModel === model ? 'selected' : ''}`}
+                      onClick={() => setSelectedModel(model)}
+                      title={CLAUDE_MODELS[model].description}
+                    >
+                      <span>{CLAUDE_MODELS[model].icon}</span>
+                      <span>{CLAUDE_MODELS[model].label}</span>
+                    </button>
+                  ))}
                 </div>
-              ))}
+              </div>
+              <div className="spawn-field">
+                <label className="spawn-label">Permissions</label>
+                <div className="spawn-select-row">
+                  {(Object.keys(PERMISSION_MODES) as PermissionMode[]).map((mode) => (
+                    <button
+                      key={mode}
+                      className={`spawn-select-btn ${permissionMode === mode ? 'selected' : ''}`}
+                      onClick={() => setPermissionMode(mode)}
+                      title={PERMISSION_MODES[mode].description}
+                    >
+                      <span>{mode === 'bypass' ? '⚡' : '🔐'}</span>
+                      <span>{PERMISSION_MODES[mode].label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
+
+            {/* Model change warning */}
             {selectedModel !== (agent.model || 'sonnet') && (
-              <div style={{
-                marginTop: '8px',
-                padding: '8px 10px',
-                background: 'rgba(255, 184, 108, 0.15)',
-                border: '1px solid rgba(255, 184, 108, 0.3)',
-                borderRadius: '6px',
-                fontSize: '11px',
-                color: 'var(--accent-orange)',
-              }}>
+              <div className="model-change-warning">
                 ⚠️ Changing model will restart the agent session
               </div>
             )}
-          </div>
 
-          {/* Chrome Mode */}
-          <div className="form-section" style={{ marginBottom: '16px' }}>
-            <label
-              className="form-label"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                cursor: 'pointer',
-                userSelect: 'none',
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={useChrome}
-                onChange={(e) => setUseChrome(e.target.checked)}
-                style={{ width: '16px', height: '16px', cursor: 'pointer' }}
-              />
-              <span>🌐 Use Chrome Browser</span>
-            </label>
-            <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px', marginLeft: '24px' }}>
-              Enable browser access for web scraping, testing, and automation tasks
+            {/* Row 2: Chrome toggle */}
+            <div className="spawn-form-row spawn-options-row">
+              <label className="spawn-checkbox">
+                <input
+                  type="checkbox"
+                  checked={useChrome}
+                  onChange={(e) => setUseChrome(e.target.checked)}
+                />
+                <span>🌐 Chrome Browser</span>
+              </label>
             </div>
-          </div>
 
-          {/* Skills Assignment */}
-          <div className="form-section">
-            <label className="form-label">Skills</label>
-            <p className="form-hint" style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
-              Select skills to assign directly to this agent
-            </p>
-            <div style={{
-              maxHeight: '200px',
-              overflowY: 'auto',
-              border: '1px solid var(--border-color)',
-              borderRadius: '6px',
-              padding: '8px'
-            }}>
-              {availableSkills.length === 0 ? (
-                <div style={{ color: 'var(--text-muted)', fontSize: '12px', textAlign: 'center', padding: '12px' }}>
-                  No enabled skills available
-                </div>
-              ) : (
-                availableSkills.map(skill => {
-                  const isClassBased = classBasedSkills.includes(skill);
-                  const isDirectlyAssigned = selectedSkillIds.has(skill.id);
+            {/* Skills section */}
+            <div className="spawn-skills-section">
+              <label className="spawn-label">
+                Skills <span className="spawn-label-hint">(click to toggle)</span>
+              </label>
+              <div className="skills-chips-compact">
+                {availableSkills.length === 0 ? (
+                  <div className="skills-empty">No enabled skills available</div>
+                ) : (
+                  availableSkills.map(skill => {
+                    const isClassBased = classBasedSkills.includes(skill);
+                    const isDirectlyAssigned = selectedSkillIds.has(skill.id);
+                    const isActive = isDirectlyAssigned || isClassBased;
 
-                  return (
-                    <div
-                      key={skill.id}
-                      onClick={() => !isClassBased && toggleSkill(skill.id)}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        padding: '6px 8px',
-                        borderRadius: '4px',
-                        cursor: isClassBased ? 'default' : 'pointer',
-                        background: (isDirectlyAssigned || isClassBased) ? 'rgba(80, 250, 123, 0.15)' : 'transparent',
-                        opacity: isClassBased ? 0.7 : 1,
-                      }}
-                    >
-                      <span style={{ width: '16px', color: 'var(--dracula-green)' }}>
-                        {(isDirectlyAssigned || isClassBased) ? '✓' : ''}
-                      </span>
-                      <span style={{ fontSize: '13px', flex: 1 }}>{skill.name}</span>
-                      {isClassBased && (
-                        <span style={{
-                          fontSize: '10px',
-                          color: 'var(--text-secondary)',
-                          background: 'var(--bg-tertiary)',
-                          padding: '2px 6px',
-                          borderRadius: '3px'
-                        }}>
-                          via class
-                        </span>
-                      )}
-                    </div>
-                  );
-                })
-              )}
+                    return (
+                      <button
+                        key={skill.id}
+                        className={`skill-chip ${isActive ? 'selected' : ''} ${isClassBased ? 'class-based' : ''}`}
+                        onClick={() => !isClassBased && toggleSkill(skill.id)}
+                        title={isClassBased ? 'Assigned via class' : skill.name}
+                      >
+                        {isActive && <span className="skill-check">✓</span>}
+                        <span className="skill-chip-name">{skill.name}</span>
+                        {isClassBased && <span className="skill-chip-badge">class</span>}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="modal-footer" style={{
-          display: 'flex',
-          gap: '8px',
-          justifyContent: 'flex-end',
-          padding: '12px 16px',
-          borderTop: '1px solid var(--border-color)'
-        }}>
+        <div className="modal-footer">
           <button className="btn btn-secondary" onClick={onClose}>
             Cancel
           </button>
