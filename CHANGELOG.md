@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.3] - 2026-01-22
+
+### Removed
+- Removed unused components (ActivityFeed, BottomToolbar, CommandInput, KeyboardShortcutsModal, MouseControlsModal, Spotlight)
+- Removed unused useFormState hook
+- Removed legacy process output file helpers from data module
+
 ## [0.6.2] - 2026-01-22
 
 ### Added
