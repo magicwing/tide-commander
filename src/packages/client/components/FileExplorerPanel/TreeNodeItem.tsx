@@ -64,14 +64,20 @@ function TreeNodeItemComponent({
       <div
         className={`tree-node ${isSelected ? 'selected' : ''} ${
           node.isDirectory ? 'directory' : 'file'
-        }`}
-        style={{ paddingLeft: `${12 + depth * 16}px` }}
+        } ${isExpanded ? 'expanded' : ''}`}
+        style={{ paddingLeft: `${8 + depth * 12}px` }}
         onClick={handleClick}
+        data-path={node.path}
       >
         {node.isDirectory ? (
-          <span className={`tree-arrow ${isExpanded ? 'expanded' : ''}`}>
-            ▶
-          </span>
+          <>
+            <span className={`tree-arrow ${isExpanded ? 'expanded' : ''}`}>
+              ▸
+            </span>
+            <span className="tree-folder-icon">
+              {isExpanded ? '📂' : '📁'}
+            </span>
+          </>
         ) : (
           <span className="tree-icon">{getFileIcon(node)}</span>
         )}
@@ -110,6 +116,7 @@ export const TreeNodeItem = memo(TreeNodeItemComponent, (prev, next) => {
   // 2. Selection state changes for this node
   // 3. Expansion state changes for this node (if directory)
   // 4. Search query changes
+  // 5. expandedPaths reference changes (to propagate to children)
 
   if (prev.node !== next.node) return false;
   if (prev.depth !== next.depth) return false;
@@ -126,18 +133,10 @@ export const TreeNodeItem = memo(TreeNodeItemComponent, (prev, next) => {
     const isExpanded = next.expandedPaths.has(next.node.path);
     if (wasExpanded !== isExpanded) return false;
 
-    // If expanded, we need to check children
-    if (isExpanded) {
-      // Check if any children's expansion state changed
-      if (prev.node.children) {
-        for (const child of prev.node.children) {
-          if (child.isDirectory) {
-            const childWasExpanded = prev.expandedPaths.has(child.path);
-            const childIsExpanded = next.expandedPaths.has(child.path);
-            if (childWasExpanded !== childIsExpanded) return false;
-          }
-        }
-      }
+    // If this node is expanded, we need to re-render when expandedPaths changes
+    // so children can receive the updated Set
+    if (isExpanded && prev.expandedPaths !== next.expandedPaths) {
+      return false;
     }
   }
 

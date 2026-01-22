@@ -5,7 +5,7 @@
  * Following ClaudeOutputPanel's architecture patterns.
  */
 
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { useStore, store } from '../../store';
 import { DiffViewer } from '../DiffViewer';
 
@@ -16,18 +16,22 @@ import type {
   TreeNode,
   GitFileStatusType,
   FolderInfo,
+  ContentMatch,
+  FileTab,
 } from './types';
 
 // Hooks
 import { useFileTree } from './useFileTree';
 import { useGitStatus, loadGitOriginalContent } from './useGitStatus';
 import { useFileContent } from './useFileContent';
+import { useFileExplorerStorage } from './useFileExplorerStorage';
 
 // Components
 import { TreeNodeItem } from './TreeNodeItem';
 import { FileViewer } from './FileViewer';
-import { SearchResults } from './SearchResults';
+import { UnifiedSearchResults } from './UnifiedSearchResults';
 import { GitChanges } from './GitChanges';
+import { FileTabs } from './FileTabs';
 
 // Constants
 import { EXTENSION_TO_LANGUAGE } from './constants';
@@ -112,6 +116,13 @@ export function FileExplorerPanel({
     clearFile,
   } = useFileContent();
 
+  // Storage hook for persistence
+  const { loadStoredState, saveState } = useFileExplorerStorage({
+    areaId: areaId || null,
+    folderPath: folderPath || null,
+    isOpen,
+  });
+
   // -------------------------------------------------------------------------
   // LOCAL STATE
   // -------------------------------------------------------------------------
@@ -120,12 +131,18 @@ export function FileExplorerPanel({
   const [viewMode, setViewMode] = useState<ViewMode>('files');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<TreeNode[]>([]);
+  const [contentSearchResults, setContentSearchResults] = useState<ContentMatch[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [originalContent, setOriginalContent] = useState<string | null>(null);
   const [selectedGitStatus, setSelectedGitStatus] = useState<GitFileStatusType | null>(null);
   const [hasInitializedView, setHasInitializedView] = useState(false);
   const [isAddingFolder, setIsAddingFolder] = useState(false);
   const [newFolderPath, setNewFolderPath] = useState('');
+  const [hasRestoredState, setHasRestoredState] = useState(false);
+
+  // File tabs state
+  const [openTabs, setOpenTabs] = useState<FileTab[]>([]);
+  const [activeTabPath, setActiveTabPath] = useState<string | null>(null);
 
   // -------------------------------------------------------------------------
   // REFS
@@ -135,13 +152,66 @@ export function FileExplorerPanel({
   const addFolderInputRef = useRef<HTMLInputElement>(null);
 
   // -------------------------------------------------------------------------
+  // STORAGE PERSISTENCE
+  // -------------------------------------------------------------------------
+
+  // Restore state from localStorage when panel opens
+  useEffect(() => {
+    if (!isOpen || hasRestoredState) return;
+
+    const restoreState = async () => {
+      const stored = await loadStoredState();
+      if (stored) {
+        setOpenTabs(stored.tabs);
+        setActiveTabPath(stored.activeTabPath);
+        setViewMode(stored.viewMode);
+        setSelectedFolderIndex(stored.selectedFolderIndex);
+        setExpandedPaths(stored.expandedPaths);
+
+        // Load the active tab's file content
+        if (stored.activeTabPath) {
+          setSelectedPath(stored.activeTabPath);
+          loadFile(stored.activeTabPath);
+        }
+      }
+      setHasRestoredState(true);
+    };
+
+    restoreState();
+  }, [isOpen, hasRestoredState, loadStoredState, setExpandedPaths, loadFile]);
+
+  // Save state to localStorage when it changes
+  useEffect(() => {
+    if (!isOpen || !hasRestoredState) return;
+
+    // Debounce saves to avoid excessive writes
+    const timeoutId = setTimeout(() => {
+      saveState({
+        tabs: openTabs,
+        activeTabPath,
+        viewMode,
+        selectedFolderIndex,
+        expandedPaths,
+      });
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [isOpen, hasRestoredState, openTabs, activeTabPath, viewMode, selectedFolderIndex, expandedPaths, saveState]);
+
+  // Reset restored state flag when area/folder changes
+  useEffect(() => {
+    setHasRestoredState(false);
+  }, [areaId, folderPath]);
+
+  // -------------------------------------------------------------------------
   // SEARCH
   // -------------------------------------------------------------------------
 
-  // Handle search using server-side API for full filesystem search
+  // Handle unified search - both filename and content, prioritizing filename matches
   useEffect(() => {
     if (!searchQuery.trim() || !currentFolder) {
       setSearchResults([]);
+      setContentSearchResults([]);
       setIsSearching(false);
       return;
     }
@@ -151,22 +221,32 @@ export function FileExplorerPanel({
     // Debounce search requests
     const timeoutId = setTimeout(async () => {
       try {
-        const res = await fetch(
-          `/api/files/search?path=${encodeURIComponent(currentFolder)}&q=${encodeURIComponent(searchQuery)}&limit=50`
-        );
-        const data = await res.json();
+        const query = searchQuery.trim();
 
-        if (res.ok && data.results) {
-          setSearchResults(data.results);
-        } else {
-          setSearchResults([]);
-        }
+        // Always search by filename
+        const filenamePromise = fetch(
+          `/api/files/search?path=${encodeURIComponent(currentFolder)}&q=${encodeURIComponent(query)}&limit=20`
+        ).then(res => res.json()).catch(() => ({ results: [] }));
+
+        // Only search content if query is at least 2 chars
+        const contentPromise = query.length >= 2
+          ? fetch(
+              `/api/files/search-content?path=${encodeURIComponent(currentFolder)}&q=${encodeURIComponent(query)}&limit=20`
+            ).then(res => res.json()).catch(() => ({ results: [] }))
+          : Promise.resolve({ results: [] });
+
+        // Run both searches in parallel
+        const [filenameData, contentData] = await Promise.all([filenamePromise, contentPromise]);
+
+        setSearchResults(filenameData.results || []);
+        setContentSearchResults(contentData.results || []);
       } catch (err) {
         console.error('[FileExplorer] Search failed:', err);
         setSearchResults([]);
+        setContentSearchResults([]);
       }
       setIsSearching(false);
-    }, 200);
+    }, 300);
 
     return () => clearTimeout(timeoutId);
   }, [searchQuery, currentFolder]);
@@ -199,29 +279,33 @@ export function FileExplorerPanel({
     }
   }, [state.fileViewerPath, isOpen, loadFile]);
 
-  // Auto-select git tab if there are changes (only on initial load)
+  // Auto-select git tab if there are changes (only on initial load, and only if no stored state was restored)
   useEffect(() => {
-    if (!hasInitializedView && gitStatus && gitStatus.isGitRepo && gitStatus.files.length > 0) {
+    // Don't auto-switch if we restored state from storage (user's previous choice)
+    if (!hasInitializedView && !hasRestoredState && gitStatus && gitStatus.isGitRepo && gitStatus.files.length > 0) {
       setViewMode('git');
       setHasInitializedView(true);
     } else if (!hasInitializedView && gitStatus) {
       setHasInitializedView(true);
     }
-  }, [gitStatus, hasInitializedView]);
+  }, [gitStatus, hasInitializedView, hasRestoredState]);
 
-  // Reset when area changes
+  // Reset when area changes - clear transient state but let storage restore persistent state
   useEffect(() => {
     if (areaId) {
       clearFile();
       setSelectedPath(null);
       setSearchQuery('');
-      setExpandedPaths(new Set());
-      setViewMode('files');
+      setContentSearchResults([]);
+      setSearchResults([]);
       setOriginalContent(null);
       setSelectedGitStatus(null);
       setHasInitializedView(false);
+      // Don't clear tabs/viewMode/expandedPaths/folderIndex - let storage restore them
+      // Mark as not restored so the storage effect will run
+      setHasRestoredState(false);
 
-      // Check if there's a pending folder to select
+      // Check if there's a pending folder to select (takes priority over storage)
       if (pendingFolderPath) {
         const newArea = state.areas.get(areaId);
         if (newArea) {
@@ -229,11 +313,9 @@ export function FileExplorerPanel({
           setSelectedFolderIndex(folderIndex >= 0 ? folderIndex : 0);
         }
         setPendingFolderPath(null);
-      } else {
-        setSelectedFolderIndex(0);
       }
     }
-  }, [areaId, pendingFolderPath, state.areas, clearFile, setExpandedPaths]);
+  }, [areaId, pendingFolderPath, state.areas, clearFile]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -271,6 +353,15 @@ export function FileExplorerPanel({
       if ((e.metaKey || e.ctrlKey) && e.key === 'p') {
         e.preventDefault();
         searchInputRef.current?.focus();
+      }
+
+      // Alt+W: Close active tab
+      if (e.altKey && e.key === 'w') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (activeTabPath) {
+          handleCloseTab(activeTabPath);
+        }
       }
     };
 
@@ -313,21 +404,44 @@ export function FileExplorerPanel({
   // HANDLERS
   // -------------------------------------------------------------------------
 
+  // Helper to open a file in a tab
+  const openFileInTab = (filePath: string, filename: string, extension: string) => {
+    // Check if tab already exists
+    const existingTab = openTabs.find(t => t.path === filePath);
+    if (!existingTab) {
+      // Add new tab
+      const newTab: FileTab = { path: filePath, filename, extension };
+      setOpenTabs(prev => [...prev, newTab]);
+    }
+    setActiveTabPath(filePath);
+    setSelectedPath(filePath);
+    loadFile(filePath);
+  };
+
   const handleSelect = (node: TreeNode) => {
     if (!node.isDirectory) {
       setSelectedGitStatus(null);
       setOriginalContent(null);
-      setSelectedPath(node.path);
-      loadFile(node.path);
+      openFileInTab(node.path, node.name, node.extension);
     }
+  };
+
+  const handleContentSearchSelect = (path: string, _line?: number) => {
+    setSelectedGitStatus(null);
+    setOriginalContent(null);
+    const filename = path.split('/').pop() || path;
+    const extension = path.substring(path.lastIndexOf('.')).toLowerCase();
+    openFileInTab(path, filename, extension);
+    // TODO: Could scroll to line if we implement line navigation
   };
 
   const handleGitFileSelect = async (path: string, status: GitFileStatusType) => {
     setSelectedGitStatus(status);
     setOriginalContent(null);
-    setSelectedPath(path);
 
-    await loadFile(path);
+    const filename = path.split('/').pop() || path;
+    const extension = path.substring(path.lastIndexOf('.')).toLowerCase();
+    openFileInTab(path, filename, extension);
 
     if (status === 'modified') {
       const { content } = await loadGitOriginalContent(path);
@@ -335,6 +449,55 @@ export function FileExplorerPanel({
         setOriginalContent(content);
       }
     }
+  };
+
+  // Tab handlers
+  const handleSelectTab = (path: string) => {
+    setActiveTabPath(path);
+    setSelectedPath(path);
+    setSelectedGitStatus(null);
+    setOriginalContent(null);
+
+    // Check if we have cached data
+    const tab = openTabs.find(t => t.path === path);
+    if (tab?.data) {
+      // Use cached data - don't reload
+    } else {
+      loadFile(path);
+    }
+  };
+
+  const handleCloseTab = (path: string) => {
+    setOpenTabs(prev => {
+      const newTabs = prev.filter(t => t.path !== path);
+      const wasActive = prev.findIndex(t => t.path === path);
+      const isClosingActiveTab = wasActive !== -1 && prev[wasActive]?.path === path &&
+                                  (activeTabPath === path || prev.find(t => t.path === activeTabPath) === undefined);
+
+      // If we're closing the active tab, switch to another
+      if (newTabs.length > 0) {
+        // Check if the active tab is being closed or no longer exists
+        const activeStillExists = newTabs.some(t => t.path === activeTabPath);
+        if (!activeStillExists) {
+          const closedIndex = prev.findIndex(t => t.path === path);
+          // Try to switch to the tab to the left, or the first tab
+          const newActiveIndex = Math.max(0, Math.min(closedIndex, newTabs.length - 1));
+          const newActiveTab = newTabs[newActiveIndex];
+          if (newActiveTab) {
+            setActiveTabPath(newActiveTab.path);
+            setSelectedPath(newActiveTab.path);
+            loadFile(newActiveTab.path);
+          }
+        }
+      } else {
+        // No tabs left
+        setActiveTabPath(null);
+        setSelectedPath(null);
+        clearFile();
+      }
+
+      return newTabs;
+    });
   };
 
   const handleAddFolder = () => {
@@ -373,6 +536,36 @@ export function FileExplorerPanel({
       setSelectedFolderIndex(folderIndex >= 0 ? folderIndex : 0);
     }
   };
+
+  // Reveal a file in the tree by expanding all parent directories
+  const handleRevealInTree = useCallback((filePath: string) => {
+    // Clear search to show tree
+    setSearchQuery('');
+
+    // Build list of all parent paths to expand
+    const pathsToExpand = new Set(expandedPaths);
+    const parts = filePath.split('/');
+
+    // Build each parent path and add to expanded set
+    let currentPath = '';
+    for (let i = 0; i < parts.length - 1; i++) {
+      currentPath += (i === 0 ? '' : '/') + parts[i];
+      if (currentPath) {
+        pathsToExpand.add(currentPath);
+      }
+    }
+
+    setExpandedPaths(pathsToExpand);
+    setSelectedPath(filePath);
+
+    // Scroll the file into view after a short delay for DOM update
+    setTimeout(() => {
+      const fileElement = document.querySelector(`[data-path="${filePath}"]`);
+      if (fileElement) {
+        fileElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 100);
+  }, [expandedPaths, setExpandedPaths]);
 
   // -------------------------------------------------------------------------
   // RENDER
@@ -579,25 +772,46 @@ export function FileExplorerPanel({
             </div>
           )}
 
-          {/* Search Bar (only in files mode) */}
+          {/* Search Bar and Toolbar (only in files mode) */}
           {viewMode === 'files' && (
-            <div className="file-explorer-search">
-              <input
-                ref={searchInputRef}
-                type="text"
-                className="file-explorer-search-input"
-                placeholder="Search... (Cmd+P)"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-              {searchQuery && (
+            <div className="file-explorer-toolbar">
+              <div className="file-explorer-search">
+                <span className="file-explorer-search-icon">🔍</span>
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  className="file-explorer-search-input"
+                  placeholder="Search files & content... (Cmd+P)"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+                {searchQuery && (
+                  <button
+                    className="file-explorer-search-clear"
+                    onClick={() => setSearchQuery('')}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+              <div className="file-explorer-toolbar-buttons">
                 <button
-                  className="file-explorer-search-clear"
-                  onClick={() => setSearchQuery('')}
+                  className="file-explorer-toolbar-btn"
+                  onClick={() => setExpandedPaths(new Set())}
+                  title="Collapse all folders"
                 >
-                  ×
+                  ⊟
                 </button>
-              )}
+                {activeTabPath && (
+                  <button
+                    className="file-explorer-toolbar-btn"
+                    onClick={() => handleRevealInTree(activeTabPath)}
+                    title="Reveal active file in tree"
+                  >
+                    ◎
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
@@ -606,13 +820,19 @@ export function FileExplorerPanel({
             {viewMode === 'files' ? (
               treeLoading ? (
                 <div className="tree-loading">Loading...</div>
-              ) : isSearching && searchQuery ? (
-                <SearchResults
-                  results={searchResults}
-                  onSelect={handleSelect}
-                  selectedPath={selectedPath}
-                  query={searchQuery}
-                />
+              ) : searchQuery.trim() ? (
+                isSearching ? (
+                  <div className="tree-loading">Searching...</div>
+                ) : (
+                  <UnifiedSearchResults
+                    filenameResults={searchResults}
+                    contentResults={contentSearchResults}
+                    onSelectFile={handleSelect}
+                    onSelectContent={handleContentSearchSelect}
+                    selectedPath={selectedPath}
+                    query={searchQuery}
+                  />
+                )
               ) : (
                 <div className="file-tree">
                   {tree.length === 0 ? (
@@ -647,6 +867,15 @@ export function FileExplorerPanel({
 
         {/* File Viewer (Right) */}
         <div className="file-explorer-viewer-panel">
+          {/* File Tabs */}
+          <FileTabs
+            tabs={openTabs}
+            activeTabPath={activeTabPath}
+            onSelectTab={handleSelectTab}
+            onCloseTab={handleCloseTab}
+          />
+
+          {/* File Content */}
           {selectedGitStatus === 'modified' && originalContent !== null && selectedFile ? (
             <DiffViewer
               originalContent={originalContent}
@@ -655,7 +884,7 @@ export function FileExplorerPanel({
               language={EXTENSION_TO_LANGUAGE[selectedFile.extension] || 'plaintext'}
             />
           ) : (
-            <FileViewer file={selectedFile} loading={fileLoading} error={fileError} />
+            <FileViewer file={selectedFile} loading={fileLoading} error={fileError} onRevealInTree={handleRevealInTree} />
           )}
         </div>
       </div>

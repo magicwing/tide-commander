@@ -49,6 +49,7 @@ export const DEFAULT_SHORTCUTS: ShortcutConfig[] = [
   shortcut('delete-selected-backspace', 'Delete Selected (Backspace)', 'Remove selected agents', 'Backspace', {}),
   shortcut('deselect-all', 'Deselect All', 'Clear agent selection', 'Escape', {}),
   shortcut('toggle-file-explorer', 'Toggle File Explorer', 'Open/close file explorer', 'e', { alt: true }),
+  shortcut('file-explorer-close-tab', 'Close File Tab', 'Close active file tab in explorer', 'w', { alt: true }),
   shortcut('toggle-spotlight', 'Toggle Spotlight', 'Open/close global search', 'p', { alt: true }),
 
   // Commander context shortcuts

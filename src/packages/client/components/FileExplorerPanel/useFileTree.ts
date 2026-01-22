@@ -54,6 +54,12 @@ export function useFileTree(currentFolder: string | null): UseFileTreeReturn {
       const data = await res.json();
 
       if (res.ok && data.tree) {
+        // Sort the tree (folders first, then alphabetically)
+        const sortedTree = sortTree(data.tree);
+
+        // Debug: log first few items to verify sorting
+        console.log('[FileTree] Sorted tree (first 10):', sortedTree.slice(0, 10).map(n => `${n.isDirectory ? 'DIR' : 'FILE'}: ${n.name}`));
+
         // Wrap in a root node for the directory
         const rootNode: TreeNode = {
           name: data.name,
@@ -61,17 +67,17 @@ export function useFileTree(currentFolder: string | null): UseFileTreeReturn {
           isDirectory: true,
           size: 0,
           extension: '',
-          children: data.tree,
+          children: sortedTree,
         };
         setTree([rootNode]);
         // Track that we've loaded this path
         const loaded = new Set<string>([currentFolder]);
-        collectLoadedPaths(data.tree, loaded);
+        collectLoadedPaths(sortedTree, loaded);
         setLoadedPaths(loaded);
 
         // Auto-expand root and first two levels of subdirectories
         const pathsToExpand = new Set<string>([currentFolder]);
-        for (const child of data.tree) {
+        for (const child of sortedTree) {
           if (child.isDirectory) {
             pathsToExpand.add(child.path);
             if (child.children) {
@@ -104,12 +110,14 @@ export function useFileTree(currentFolder: string | null): UseFileTreeReturn {
       const data = await res.json();
 
       if (res.ok && data.tree) {
+        // Sort the loaded children (folders first, then alphabetically)
+        const sortedChildren = sortTree(data.tree);
         // Update the tree by finding the node and setting its children
         setTree((prevTree) => {
           const newTree = JSON.parse(JSON.stringify(prevTree)) as TreeNode[];
           const node = findNodeByPath(newTree, dirPath);
           if (node) {
-            node.children = data.tree;
+            node.children = sortedChildren;
           }
           return newTree;
         });
@@ -132,15 +140,11 @@ export function useFileTree(currentFolder: string | null): UseFileTreeReturn {
    * Uses refs to avoid stale closures and keep the function stable
    */
   const togglePath = useCallback(async (path: string) => {
-    console.log('[FileTree] togglePath called:', path);
-
     // Use ref to get current expansion state (avoids stale closure)
     const isCurrentlyExpanded = expandedPathsRef.current.has(path);
-    console.log('[FileTree] isCurrentlyExpanded:', isCurrentlyExpanded);
 
     if (isCurrentlyExpanded) {
       // Collapsing - just update expanded paths
-      console.log('[FileTree] Collapsing');
       setExpandedPaths((prev) => {
         const next = new Set(prev);
         next.delete(path);
@@ -148,7 +152,6 @@ export function useFileTree(currentFolder: string | null): UseFileTreeReturn {
       });
     } else {
       // Expanding - first expand, then load if needed
-      console.log('[FileTree] Expanding');
       setExpandedPaths((prev) => {
         const next = new Set(prev);
         next.add(path);
@@ -160,15 +163,9 @@ export function useFileTree(currentFolder: string | null): UseFileTreeReturn {
       const currentLoadedPaths = loadedPathsRef.current;
       const node = findNodeByPath(currentTree, path);
 
-      console.log('[FileTree] Node found:', !!node, node?.isDirectory ? 'isDirectory' : 'isFile');
-      console.log('[FileTree] loadedPaths has path:', currentLoadedPaths.has(path));
-      console.log('[FileTree] loadedPaths size:', currentLoadedPaths.size);
-
       if (node && node.isDirectory) {
         const needsLoad = !currentLoadedPaths.has(path);
-        console.log('[FileTree] needsLoad:', needsLoad);
         if (needsLoad) {
-          console.log('[FileTree] Calling loadChildren for:', path);
           await loadChildren(path);
         }
       }
@@ -219,6 +216,32 @@ function collectLoadedPaths(nodes: TreeNode[], paths: Set<string>): void {
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
+
+/**
+ * Sort tree nodes: folders first, then files, both alphabetically (case-insensitive)
+ */
+function sortNodes(nodes: TreeNode[]): TreeNode[] {
+  return [...nodes].sort((a, b) => {
+    // Folders first
+    if (a.isDirectory && !b.isDirectory) return -1;
+    if (!a.isDirectory && b.isDirectory) return 1;
+    // Alphabetical (case-insensitive)
+    return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+  });
+}
+
+/**
+ * Recursively sort all nodes in the tree (creates new array, doesn't mutate)
+ */
+function sortTree(nodes: TreeNode[]): TreeNode[] {
+  const sorted = sortNodes(nodes);
+  return sorted.map(node => {
+    if (node.isDirectory && node.children) {
+      return { ...node, children: sortTree(node.children) };
+    }
+    return node;
+  });
+}
 
 /**
  * Flatten tree structure for search

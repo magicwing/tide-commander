@@ -93,6 +93,152 @@ router.get('/read', async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/files/exists - Check if a file exists
+router.get('/exists', async (req: Request, res: Response) => {
+  try {
+    const filePath = req.query.path as string;
+
+    if (!filePath) {
+      res.status(400).json({ error: 'Missing path parameter' });
+      return;
+    }
+
+    if (!path.isAbsolute(filePath)) {
+      res.status(400).json({ error: 'Path must be absolute' });
+      return;
+    }
+
+    const exists = fs.existsSync(filePath);
+    res.json({ exists, path: filePath });
+  } catch (err: any) {
+    log.error(' Failed to check file existence:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/files/info - Get file info without content
+router.get('/info', async (req: Request, res: Response) => {
+  try {
+    const filePath = req.query.path as string;
+
+    if (!filePath) {
+      res.status(400).json({ error: 'Missing path parameter' });
+      return;
+    }
+
+    if (!path.isAbsolute(filePath)) {
+      res.status(400).json({ error: 'Path must be absolute' });
+      return;
+    }
+
+    if (!fs.existsSync(filePath)) {
+      res.status(404).json({ error: 'File not found' });
+      return;
+    }
+
+    const stats = fs.statSync(filePath);
+
+    if (stats.isDirectory()) {
+      res.status(400).json({ error: 'Path is a directory' });
+      return;
+    }
+
+    const extension = path.extname(filePath).toLowerCase();
+    const filename = path.basename(filePath);
+
+    res.json({
+      path: filePath,
+      filename,
+      extension,
+      size: stats.size,
+      modified: stats.mtime,
+    });
+  } catch (err: any) {
+    log.error(' Failed to get file info:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/files/binary - Read binary file (for images, PDFs, downloads)
+router.get('/binary', async (req: Request, res: Response) => {
+  try {
+    const filePath = req.query.path as string;
+    const download = req.query.download === 'true';
+
+    if (!filePath) {
+      res.status(400).json({ error: 'Missing path parameter' });
+      return;
+    }
+
+    if (!path.isAbsolute(filePath)) {
+      res.status(400).json({ error: 'Path must be absolute' });
+      return;
+    }
+
+    if (!fs.existsSync(filePath)) {
+      res.status(404).json({ error: 'File not found' });
+      return;
+    }
+
+    const stats = fs.statSync(filePath);
+
+    if (stats.isDirectory()) {
+      res.status(400).json({ error: 'Path is a directory' });
+      return;
+    }
+
+    // Limit file size to 50MB for binary files
+    if (stats.size > 50 * 1024 * 1024) {
+      res.status(400).json({ error: 'File too large (max 50MB)' });
+      return;
+    }
+
+    const extension = path.extname(filePath).toLowerCase();
+    const filename = path.basename(filePath);
+
+    // Set content type based on extension
+    const mimeTypes: Record<string, string> = {
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+      '.bmp': 'image/bmp',
+      '.ico': 'image/x-icon',
+      '.svg': 'image/svg+xml',
+      '.pdf': 'application/pdf',
+      '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      '.xls': 'application/vnd.ms-excel',
+      '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      '.doc': 'application/msword',
+      '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      '.ppt': 'application/vnd.ms-powerpoint',
+      '.zip': 'application/zip',
+      '.tar': 'application/x-tar',
+      '.gz': 'application/gzip',
+      '.mp3': 'audio/mpeg',
+      '.mp4': 'video/mp4',
+      '.wav': 'audio/wav',
+    };
+
+    const contentType = mimeTypes[extension] || 'application/octet-stream';
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Length', stats.size);
+
+    if (download) {
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    }
+
+    // Stream the file
+    const stream = fs.createReadStream(filePath);
+    stream.pipe(res);
+  } catch (err: any) {
+    log.error(' Failed to read binary file:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/files/list - List directory contents
 router.get('/list', async (req: Request, res: Response) => {
   try {
@@ -331,6 +477,139 @@ router.get('/search', async (req: Request, res: Response) => {
     res.json({ results });
   } catch (err: any) {
     log.error(' Failed to search files:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Content search result type
+interface ContentMatch {
+  path: string;
+  name: string;
+  extension: string;
+  matches: {
+    line: number;
+    content: string;
+    context?: { before: string; after: string };
+  }[];
+}
+
+// Text file extensions for content search
+const TEXT_EXTENSIONS = new Set([
+  '.txt', '.md', '.markdown', '.json', '.yaml', '.yml', '.xml', '.html', '.htm',
+  '.css', '.scss', '.sass', '.less', '.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs',
+  '.py', '.rb', '.php', '.java', '.c', '.cpp', '.h', '.hpp', '.cs', '.go', '.rs',
+  '.swift', '.kt', '.scala', '.clj', '.ex', '.exs', '.erl', '.hs', '.ml', '.fs',
+  '.sql', '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat', '.cmd',
+  '.toml', '.ini', '.cfg', '.conf', '.env', '.gitignore', '.dockerignore',
+  '.editorconfig', '.prettierrc', '.eslintrc', '.babelrc',
+  '.log', '.csv', '.tsv', '.svg', '.vue', '.svelte',
+]);
+
+// Helper function to search file contents recursively
+function searchFileContents(
+  dirPath: string,
+  query: string,
+  results: ContentMatch[],
+  maxResults: number,
+  depth: number = 0
+): void {
+  if (results.length >= maxResults || depth > 10) return;
+
+  try {
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    const queryLower = query.toLowerCase();
+
+    for (const entry of entries) {
+      if (results.length >= maxResults) break;
+
+      // Skip hidden and common non-essential
+      if (entry.name.startsWith('.')) continue;
+      if (['node_modules', 'dist', 'build', '.git', '__pycache__', 'venv', '.venv', 'target', 'vendor'].includes(entry.name)) continue;
+
+      const fullPath = path.join(dirPath, entry.name);
+
+      if (entry.isDirectory()) {
+        // Recurse into directories
+        searchFileContents(fullPath, query, results, maxResults, depth + 1);
+      } else {
+        // Check if it's a text file we can search
+        const ext = path.extname(entry.name).toLowerCase();
+        if (!TEXT_EXTENSIONS.has(ext) && ext !== '') continue;
+
+        try {
+          const stats = fs.statSync(fullPath);
+          // Skip files larger than 1MB
+          if (stats.size > 1024 * 1024) continue;
+
+          const content = fs.readFileSync(fullPath, 'utf-8');
+          const lines = content.split('\n');
+          const matches: ContentMatch['matches'] = [];
+
+          for (let i = 0; i < lines.length && matches.length < 5; i++) {
+            const line = lines[i];
+            if (line.toLowerCase().includes(queryLower)) {
+              matches.push({
+                line: i + 1,
+                content: line.slice(0, 200), // Truncate long lines
+                context: {
+                  before: i > 0 ? lines[i - 1].slice(0, 100) : '',
+                  after: i < lines.length - 1 ? lines[i + 1].slice(0, 100) : '',
+                },
+              });
+            }
+          }
+
+          if (matches.length > 0) {
+            results.push({
+              path: fullPath,
+              name: entry.name,
+              extension: ext,
+              matches,
+            });
+          }
+        } catch {
+          // Skip files we can't read (binary, permission issues)
+        }
+      }
+    }
+  } catch {
+    // Skip directories we can't read
+  }
+}
+
+// GET /api/files/search-content - Search file contents
+router.get('/search-content', async (req: Request, res: Response) => {
+  try {
+    const dirPath = req.query.path as string;
+    const query = req.query.q as string;
+    const maxResults = parseInt(req.query.limit as string) || 30;
+
+    if (!dirPath || !query) {
+      res.status(400).json({ error: 'Missing path or query parameter' });
+      return;
+    }
+
+    if (query.length < 2) {
+      res.status(400).json({ error: 'Query must be at least 2 characters' });
+      return;
+    }
+
+    if (!path.isAbsolute(dirPath)) {
+      res.status(400).json({ error: 'Path must be absolute' });
+      return;
+    }
+
+    if (!fs.existsSync(dirPath)) {
+      res.status(404).json({ error: 'Directory not found' });
+      return;
+    }
+
+    const results: ContentMatch[] = [];
+    searchFileContents(dirPath, query, results, maxResults);
+
+    res.json({ results });
+  } catch (err: any) {
+    log.error(' Failed to search content:', err);
     res.status(500).json({ error: err.message });
   }
 });

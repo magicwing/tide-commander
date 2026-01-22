@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-01-21
+
+### Added
+- File tabs component for multi-file editing support
+- Content search results component with file content searching
+- Unified search results combining file tree and content search
+- `useFileExplorerStorage` hook for persisting explorer state
+- Server-side file content search API endpoint (`/api/files/search`)
+- Enhanced syntax highlighting with more language support
+- File viewer image preview and binary file detection
+- Line numbers in file viewer
+- Copy file path functionality
+
+### Changed
+- Completely revamped file explorer UI with tabs and search integration
+- Enhanced file content hook with caching and better error handling
+- Improved file tree with search filtering and better performance
+- Updated TreeNodeItem with refined styling and interactions
+- Expanded syntax highlighting constants for more file types
+- Improved guake terminal styling
+
 ## [0.2.0] - 2026-01-21
 
 ### Added

@@ -2819,7 +2819,7 @@
 
       &.active {
         background: rgba($dracula-yellow, 0.3);
-        border-color: lighten($dracula-yellow, 10%);
+        border-color: color.adjust($dracula-yellow, $lightness: 10%);
       }
     }
   }
@@ -2890,7 +2890,7 @@
 
       &:hover {
         background: rgba($dracula-purple, 0.3);
-        border-color: lighten($dracula-purple, 10%);
+        border-color: color.adjust($dracula-purple, $lightness: 10%);
       }
 
       &.clear-btn {
@@ -2900,7 +2900,7 @@
 
         &:hover {
           background: rgba($dracula-red, 0.3);
-          border-color: lighten($dracula-red, 10%);
+          border-color: color.adjust($dracula-red, $lightness: 10%);
         }
       }
     }
@@ -2962,7 +2962,7 @@
       }
 
       &:hover input:checked + .toggle-switch {
-        background: lighten($dracula-purple, 10%);
+        background: color.adjust($dracula-purple, $lightness: 10%);
       }
     }
   }
@@ -3325,7 +3325,7 @@
 
   &:hover {
     background: rgba($dracula-orange, 0.2);
-    border-color: lighten($dracula-orange, 10%);
+    border-color: color.adjust($dracula-orange, $lightness: 10%);
   }
 
   &.active {

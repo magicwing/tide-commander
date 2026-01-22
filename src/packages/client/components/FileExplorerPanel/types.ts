@@ -21,6 +21,8 @@ export interface TreeNode {
 // FILE TYPES
 // ============================================================================
 
+export type FileType = 'text' | 'image' | 'pdf' | 'binary';
+
 export interface FileData {
   path: string;
   filename: string;
@@ -28,6 +30,28 @@ export interface FileData {
   content: string;
   size: number;
   modified: string;
+  fileType: FileType;
+  // For images/binary, this is a data URL or blob URL
+  dataUrl?: string;
+}
+
+// ============================================================================
+// FILE TAB TYPES
+// ============================================================================
+
+export interface FileTab {
+  path: string;
+  filename: string;
+  extension: string;
+  // Cache the file data so switching tabs is instant
+  data?: FileData;
+}
+
+export interface FileTabsProps {
+  tabs: FileTab[];
+  activeTabPath: string | null;
+  onSelectTab: (path: string) => void;
+  onCloseTab: (path: string) => void;
 }
 
 // ============================================================================
@@ -91,11 +115,34 @@ export interface FileViewerProps {
   file: FileData | null;
   loading: boolean;
   error: string | null;
+  onRevealInTree?: (path: string) => void;
 }
 
 export interface SearchResultsProps {
   results: TreeNode[];
   onSelect: (node: TreeNode) => void;
+  selectedPath: string | null;
+  query: string;
+}
+
+// ============================================================================
+// CONTENT SEARCH TYPES
+// ============================================================================
+
+export interface ContentMatch {
+  path: string;
+  name: string;
+  extension: string;
+  matches: {
+    line: number;
+    content: string;
+    context?: { before: string; after: string };
+  }[];
+}
+
+export interface ContentSearchResultsProps {
+  results: ContentMatch[];
+  onSelect: (path: string, line?: number) => void;
   selectedPath: string | null;
   query: string;
 }

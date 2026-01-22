@@ -924,6 +924,50 @@
   }
 }
 
+// IDE Style - Toolbar (search + buttons)
+.file-explorer-toolbar {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  gap: 8px;
+  background: $bg-tertiary;
+  border-bottom: 1px solid $border-color;
+
+  .file-explorer-search {
+    flex: 1;
+    padding: 0;
+    background: transparent;
+    border-bottom: none;
+  }
+}
+
+.file-explorer-toolbar-buttons {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.file-explorer-toolbar-btn {
+  background: transparent;
+  border: 1px solid $border-color;
+  color: $text-muted;
+  width: 28px;
+  height: 28px;
+  border-radius: $radius-sm;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all $transition-fast;
+
+  &:hover {
+    background: $accent-blue;
+    border-color: $accent-blue;
+    color: $text-primary;
+  }
+}
+
 // IDE Style - Main Split Layout
 .file-explorer-main {
   flex: 1;
@@ -1111,7 +1155,7 @@
 }
 
 .file-tree {
-  padding: 4px 0;
+  padding: 2px 0;
 }
 
 .tree-loading,
@@ -1130,22 +1174,54 @@
 .tree-node {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
+  gap: 3px;
+  padding: 2px 6px;
   cursor: pointer;
   transition: background $transition-fast;
   white-space: nowrap;
+  border-radius: 3px;
+  margin: 0 2px;
+  position: relative;
 
   &:hover {
-    background: rgba($accent-blue, 0.1);
+    background: rgba($accent-blue, 0.12);
+
+    .tree-arrow {
+      color: $dracula-cyan;
+    }
   }
 
   &.selected {
     background: rgba($accent-blue, 0.2);
+
+    &::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 1px;
+      bottom: 1px;
+      width: 2px;
+      background: $accent-blue;
+      border-radius: 0 1px 1px 0;
+    }
+
+    .tree-name {
+      color: $text-primary;
+    }
   }
 
-  &.directory .tree-name {
-    color: $dracula-cyan;
+  &.directory {
+    .tree-name {
+      color: $dracula-cyan;
+    }
+
+    .tree-folder-icon {
+      color: $dracula-yellow;
+    }
+
+    &.expanded .tree-folder-icon {
+      color: $dracula-orange;
+    }
   }
 
   &.file .tree-name {
@@ -1155,33 +1231,42 @@
 
 .tree-arrow {
   font-size: 8px;
-  color: $text-muted;
-  width: 16px;
+  color: rgba($text-muted, 0.5);
+  width: 10px;
   text-align: center;
-  transition: transform 0.15s;
+  transition: transform 0.15s ease, color 0.1s;
   flex-shrink: 0;
 
   &.expanded {
     transform: rotate(90deg);
+    color: $dracula-cyan;
   }
 }
 
+.tree-folder-icon {
+  font-size: 13px;
+  width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
 .tree-icon {
-  font-size: 14px;
-  width: 16px;
+  font-size: 12px;
+  width: 14px;
   text-align: center;
   flex-shrink: 0;
 }
 
 .tree-name {
   font-family: $font-mono;
-  font-size: 12px;
+  font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: 1.4;
 }
 
 .tree-children {
-  // Indentation handled via padding
+  // No visual guide lines - keeps it cleaner and saves space
 }
 
 // Search Results
@@ -1246,6 +1331,249 @@
   color: $dracula-yellow;
   padding: 0 2px;
   border-radius: 2px;
+}
+
+// Search Icon
+.file-explorer-search-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+// Unified Search Results
+.unified-search-results {
+  padding: 0;
+}
+
+.unified-search-section {
+  &:not(:last-child) {
+    border-bottom: 1px solid $border-color;
+  }
+}
+
+.unified-search-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.2);
+  font-size: 11px;
+  color: $text-muted;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.unified-search-section-icon {
+  font-size: 12px;
+}
+
+.unified-search-section-title {
+  font-weight: 600;
+}
+
+.unified-search-section-count {
+  margin-left: auto;
+  font-weight: normal;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.unified-search-section-content {
+  // Content styles inherited from existing search results
+}
+
+// Content Search Results
+.content-search-results {
+  padding: 4px 0;
+}
+
+.content-search-summary {
+  padding: 8px 12px;
+  font-size: 11px;
+  color: $text-muted;
+  border-bottom: 1px solid $border-color;
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.content-search-item {
+  border-bottom: 1px solid rgba($border-color, 0.5);
+
+  &.selected {
+    background: rgba($accent-blue, 0.05);
+  }
+}
+
+.content-search-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background $transition-fast;
+
+  &:hover {
+    background: rgba($accent-blue, 0.1);
+  }
+}
+
+.content-search-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.content-search-name {
+  flex: 1;
+  font-family: $font-mono;
+  font-size: 12px;
+  color: $dracula-cyan;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.content-search-count {
+  font-size: 10px;
+  color: $text-muted;
+  flex-shrink: 0;
+}
+
+.content-search-matches {
+  padding-left: 12px;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.content-search-match {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background $transition-fast;
+
+  &:hover {
+    background: rgba($accent-blue, 0.1);
+  }
+}
+
+.content-search-line-num {
+  font-family: $font-mono;
+  font-size: 10px;
+  color: $dracula-comment;
+  min-width: 36px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.content-search-line-content {
+  flex: 1;
+  font-family: $font-mono;
+  font-size: 11px;
+  color: $text-secondary;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  .search-highlight {
+    background: rgba($dracula-yellow, 0.4);
+    color: $dracula-yellow;
+  }
+}
+
+// ============================================================================
+// FILE TABS
+// ============================================================================
+
+.file-tabs-bar {
+  flex-shrink: 0;
+  background: $dracula-bg-darker;
+  border-bottom: 1px solid $border-color;
+  overflow-x: auto;
+  overflow-y: hidden;
+
+  // Hide scrollbar but keep functionality
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.file-tabs-container {
+  display: flex;
+  min-height: 36px;
+}
+
+.file-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  padding-right: 8px;
+  background: transparent;
+  border-right: 1px solid $border-color;
+  cursor: pointer;
+  transition: background $transition-fast;
+  flex-shrink: 0;
+  max-width: 180px;
+  min-width: 100px;
+
+  &:hover {
+    background: rgba($accent-blue, 0.1);
+
+    .file-tab-close {
+      opacity: 1;
+    }
+  }
+
+  &.active {
+    background: $dracula-bg;
+    border-bottom: 2px solid $accent-blue;
+    margin-bottom: -1px;
+
+    .file-tab-name {
+      color: $text-primary;
+    }
+
+    .file-tab-close {
+      opacity: 0.7;
+    }
+  }
+}
+
+.file-tab-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.file-tab-name {
+  font-family: $font-mono;
+  font-size: 12px;
+  color: $text-secondary;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.file-tab-close {
+  background: transparent;
+  border: none;
+  color: $text-muted;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: $radius-sm;
+  opacity: 0;
+  transition: all $transition-fast;
+  flex-shrink: 0;
+  line-height: 1;
+
+  &:hover {
+    background: rgba($dracula-red, 0.3);
+    color: $dracula-red;
+  }
 }
 
 // IDE Style - File Viewer Panel (Right)
@@ -1639,4 +1967,152 @@ pre[class*="language-"] {
   font-size: 10px;
   color: $text-muted;
   white-space: nowrap;
+}
+
+// ============================================================================
+// FILE VIEWER - MULTI-FORMAT SUPPORT
+// ============================================================================
+
+.file-viewer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  background: $dracula-bg-darker;
+  border-bottom: 1px solid $dracula-current;
+}
+
+.file-viewer-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.file-viewer-header-right {
+  flex-shrink: 0;
+  margin-left: 16px;
+  display: flex;
+  align-items: center;
+}
+
+.file-viewer-download-btn {
+  background: transparent;
+  border: 1px solid $border-color;
+  color: $text-secondary;
+  padding: 6px 12px;
+  border-radius: $radius-sm;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all $transition-fast;
+  white-space: nowrap;
+
+  &:hover {
+    background: $accent-blue;
+    border-color: $accent-blue;
+    color: white;
+  }
+
+  &.large {
+    padding: 12px 24px;
+    font-size: 14px;
+    font-weight: 500;
+  }
+}
+
+.file-viewer-locate-btn {
+  background: transparent;
+  border: 1px solid $border-color;
+  color: $text-muted;
+  width: 28px;
+  height: 28px;
+  border-radius: $radius-sm;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all $transition-fast;
+  margin-right: 8px;
+
+  &:hover {
+    background: $accent-blue;
+    border-color: $accent-blue;
+    color: white;
+  }
+}
+
+// Image viewer
+.file-viewer-image-wrapper {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  overflow: auto;
+  background: repeating-conic-gradient(
+    rgba(255, 255, 255, 0.03) 0% 25%,
+    transparent 0% 50%
+  ) 50% / 20px 20px;
+}
+
+.file-viewer-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: $radius-sm;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+// PDF viewer
+.file-viewer-pdf-wrapper {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.file-viewer-pdf {
+  flex: 1;
+  border: none;
+  background: white;
+}
+
+// Binary file viewer (download only)
+.file-viewer-binary {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  text-align: center;
+  gap: 16px;
+}
+
+.file-viewer-binary-icon {
+  font-size: 64px;
+  opacity: 0.8;
+}
+
+.file-viewer-binary-name {
+  font-family: $font-mono;
+  font-size: 16px;
+  font-weight: 600;
+  color: $dracula-fg;
+  word-break: break-all;
+}
+
+.file-viewer-binary-size {
+  font-family: $font-mono;
+  font-size: 12px;
+  color: $text-muted;
+}
+
+.file-viewer-binary-message {
+  font-size: 13px;
+  color: $text-secondary;
+  margin-top: 8px;
 }
