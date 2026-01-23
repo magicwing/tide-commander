@@ -169,6 +169,7 @@ class Store
       toolExecutions: [],
       fileChanges: [],
       terminalOpen: false,
+      terminalResizing: false,
       mobileView: 'terminal',
       settings: this.loadSettings(),
       shortcuts: this.loadShortcuts(),
@@ -333,6 +334,11 @@ class Store
 
   setMobileView(view: 'terminal' | '3d'): void {
     this.state.mobileView = view;
+    this.notify();
+  }
+
+  setTerminalResizing(resizing: boolean): void {
+    this.state.terminalResizing = resizing;
     this.notify();
   }
 

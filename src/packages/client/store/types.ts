@@ -122,6 +122,8 @@ export interface StoreState {
   fileChanges: FileChange[];
   // Terminal open state
   terminalOpen: boolean;
+  // Terminal resizing state (disables battlefield drag selection)
+  terminalResizing: boolean;
   // Mobile view mode
   mobileView: 'terminal' | '3d';
   // Settings

@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.1] - 2026-01-22
+
+### Added
+- Terminal resizing state in store to coordinate with battlefield interactions
+- Visibility change listener to cancel drag states when document becomes hidden
+- `useTerminalResizing` selector for components needing resize state
+
+### Fixed
+- Selection box appearing when dragging external windows (like Guake) over canvas
+- Drag selection not canceling when window loses focus or visibility
+- Selection box persisting during terminal resize operations
+
+### Changed
+- InputHandler now tracks if pointer down originated on canvas to prevent false drag events
+- Added `cancelAllDragStates()` method to centralize cleanup of all drag/selection states
+
 ## [0.8.0] - 2026-01-22
 
 ### Added

@@ -61,6 +61,11 @@ export type ResizeHandlesGetter = () => THREE.Mesh[];
 export type ResizeModeChecker = () => boolean;
 
 /**
+ * UI blocking checker (e.g., terminal resizing) function type.
+ */
+export type UIBlockingChecker = () => boolean;
+
+/**
  * Area at position getter function type.
  */
 export type AreaAtPositionGetter = (pos: { x: number; z: number }) => { id: string } | null;

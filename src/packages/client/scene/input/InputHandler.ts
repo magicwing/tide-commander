@@ -59,6 +59,7 @@ export class InputHandler {
   private isDragging = false;
   private dragStart = { x: 0, y: 0 };
   private dragCurrent = { x: 0, y: 0 };
+  private pointerDownOnCanvas = false; // Track if pointer down originated on our canvas
 
   // Right-click drag state
   private isRightDragging = false;
@@ -232,6 +233,7 @@ export class InputHandler {
     this.trackpadHandler.dispose();
     this.clearHoverTimer();
     window.removeEventListener('blur', this.onWindowBlur);
+    document.removeEventListener('visibilitychange', this.onVisibilityChange);
   }
 
   /**
@@ -314,11 +316,19 @@ export class InputHandler {
     this.canvas.addEventListener('touchend', this.onTouchEnd, { passive: false });
     // Clear hover when window loses focus (e.g., switching to Guake terminal)
     window.addEventListener('blur', this.onWindowBlur);
+    // Also listen for visibility changes
+    document.addEventListener('visibilitychange', this.onVisibilityChange);
   }
 
   // --- Pointer Event Handlers ---
 
   private onPointerDown = (event: PointerEvent): void => {
+    // Ignore pointer events when window doesn't have focus or isn't the active element
+    // This prevents selection box when dragging overlay windows like Guake over the canvas
+    if (!document.hasFocus() || document.visibilityState === 'hidden') {
+      return;
+    }
+
     const isTouch = event.pointerType === 'touch';
 
     if (event.button === 0) {
@@ -362,6 +372,7 @@ export class InputHandler {
       this.isDragging = false;
       this.dragStart = { x: event.clientX, y: event.clientY };
       this.dragCurrent = { x: event.clientX, y: event.clientY };
+      this.pointerDownOnCanvas = true; // Mark that we initiated this drag
     }
 
     if (event.button === 2) {
@@ -386,6 +397,17 @@ export class InputHandler {
   };
 
   private onPointerMove = (event: PointerEvent): void => {
+    // Ignore events when window doesn't have focus or document is hidden
+    // This helps prevent selection box when dragging external windows over the canvas
+    if (!document.hasFocus() || document.hidden) {
+      if (this.isDragging) {
+        this.isDragging = false;
+        this.selectionBox.classList.remove('active');
+        this.pointerDownOnCanvas = false;
+      }
+      return;
+    }
+
     if (event.buttons & 1) {
       // Handle resize mode
       if (this.isResizing) {
@@ -427,6 +449,12 @@ export class InputHandler {
 
       // Skip selection box on touch
       if (event.pointerType === 'touch') {
+        return;
+      }
+
+      // Only process selection box if we initiated the pointer down on our canvas
+      // and terminal is not being resized
+      if (!this.pointerDownOnCanvas || store.getState().terminalResizing) {
         return;
       }
 
@@ -513,6 +541,9 @@ export class InputHandler {
       } else if (!event.ctrlKey) {
         this.handleSingleClick(event);
       }
+
+      // Reset the pointer down flag
+      this.pointerDownOnCanvas = false;
     }
 
     if (event.button === 2) {
@@ -539,9 +570,26 @@ export class InputHandler {
   };
 
   private onWindowBlur = (): void => {
-    // Clear hover state when window loses focus (e.g., switching to another app)
-    this.clearHoverState();
+    this.cancelAllDragStates();
   };
+
+  private onVisibilityChange = (): void => {
+    if (document.hidden) {
+      this.cancelAllDragStates();
+    }
+  };
+
+  private cancelAllDragStates(): void {
+    // Clear hover state
+    this.clearHoverState();
+    // Cancel any active drag selection
+    if (this.isDragging) {
+      this.isDragging = false;
+      this.selectionBox.classList.remove('active');
+    }
+    // Reset pointer tracking
+    this.pointerDownOnCanvas = false;
+  }
 
   private clearHoverState(): void {
     this.clearHoverTimer();

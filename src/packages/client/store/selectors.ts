@@ -514,6 +514,13 @@ export function useTerminalOpen(): boolean {
 }
 
 /**
+ * Get terminal resizing state. Only re-renders when resizing state changes.
+ */
+export function useTerminalResizing(): boolean {
+  return useSelector(useCallback((state: StoreState) => state.terminalResizing, []));
+}
+
+/**
  * Get mobile view mode. Only re-renders when mobile view changes.
  */
 export function useMobileView(): 'terminal' | '3d' {

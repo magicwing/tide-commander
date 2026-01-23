@@ -292,6 +292,8 @@ export function ClaudeOutputPanel() {
       resizeStartHeightRef.current = terminalHeight;
       document.body.style.cursor = 'ns-resize';
       document.body.style.userSelect = 'none';
+      // Notify store that terminal is being resized (disables battlefield drag selection)
+      store.setTerminalResizing(true);
     },
     [terminalHeight]
   );
@@ -316,6 +318,8 @@ export function ClaudeOutputPanel() {
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
         setStorageNumber(STORAGE_KEYS.TERMINAL_HEIGHT, terminalHeightRef.current);
+        // Notify store that terminal resize is complete
+        store.setTerminalResizing(false);
       }
     };
 
