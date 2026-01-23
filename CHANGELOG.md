@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.0] - 2026-01-22
+
+### Added
+- **Skill Hot-Reload** - When a skill's content is updated, all agents using that skill are automatically hot-restarted with preserved context
+- Window blur event handler to clear hover state when switching apps (e.g., to Guake terminal)
+
+### Changed
+- Agent skill changes now trigger hot-restart to apply new skills in system prompt
+- Refactored hover state clearing into reusable `clearHoverState()` method
+- Skills are now properly applied on agent restart via `--resume` flag
+
+### Fixed
+- Hover tooltip persists when switching to another application window
+
 ## [0.7.3] - 2026-01-22
 
 ### Changed

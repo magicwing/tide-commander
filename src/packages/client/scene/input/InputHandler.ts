@@ -231,6 +231,7 @@ export class InputHandler {
     this.touchHandler.dispose();
     this.trackpadHandler.dispose();
     this.clearHoverTimer();
+    window.removeEventListener('blur', this.onWindowBlur);
   }
 
   /**
@@ -311,6 +312,8 @@ export class InputHandler {
     this.canvas.addEventListener('touchstart', this.onTouchStart, { passive: false });
     this.canvas.addEventListener('touchmove', this.onTouchMove, { passive: false });
     this.canvas.addEventListener('touchend', this.onTouchEnd, { passive: false });
+    // Clear hover when window loses focus (e.g., switching to Guake terminal)
+    window.addEventListener('blur', this.onWindowBlur);
   }
 
   // --- Pointer Event Handlers ---
@@ -532,12 +535,21 @@ export class InputHandler {
 
   private onPointerLeave = (_event: PointerEvent): void => {
     // Clear hover state when mouse leaves the canvas
+    this.clearHoverState();
+  };
+
+  private onWindowBlur = (): void => {
+    // Clear hover state when window loses focus (e.g., switching to another app)
+    this.clearHoverState();
+  };
+
+  private clearHoverState(): void {
     this.clearHoverTimer();
     if (this.hoveredAgentId !== null) {
       this.hoveredAgentId = null;
       this.callbacks.onAgentHover?.(null, null);
     }
-  };
+  }
 
   private onContextMenu = (event: MouseEvent): void => {
     event.preventDefault();

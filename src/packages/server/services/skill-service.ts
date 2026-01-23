@@ -6,7 +6,7 @@
  * specific tasks. They can be assigned to individual agents or entire agent classes.
  */
 
-import type { Skill, AgentClass } from '../../shared/types.js';
+import type { Skill, AgentClass, Agent } from '../../shared/types.js';
 import { loadSkills, saveSkills } from '../data/index.js';
 import { createLogger, generateId, generateSlug } from '../utils/index.js';
 
@@ -382,6 +382,112 @@ ${sections.join('\n\n---\n\n')}
 ---
 
 `;
+}
+
+// ============================================================================
+// Skill Hot-Reload
+// ============================================================================
+
+// Service interface types for hot-reload
+interface AgentServiceInterface {
+  getAllAgents(): Agent[];
+  updateAgent(id: string, updates: Partial<Agent>, updateActivity?: boolean): Agent | null;
+}
+
+interface ClaudeServiceInterface {
+  stopAgent(agentId: string): Promise<void>;
+}
+
+// These will be set by setupSkillHotReload
+let agentServiceRef: AgentServiceInterface | null = null;
+let claudeServiceRef: ClaudeServiceInterface | null = null;
+let broadcastRef: ((message: any) => void) | null = null;
+
+/**
+ * Set up skill hot-reload: when a skill's content changes, restart all agents using that skill
+ * so they pick up the new instructions in their system prompt.
+ *
+ * @param agentSvc - Reference to agent service
+ * @param claudeSvc - Reference to claude service
+ * @param broadcast - Function to broadcast messages to all clients
+ */
+export function setupSkillHotReload(
+  agentSvc: AgentServiceInterface,
+  claudeSvc: ClaudeServiceInterface,
+  broadcast: (message: any) => void
+): void {
+  agentServiceRef = agentSvc;
+  claudeServiceRef = claudeSvc;
+  broadcastRef = broadcast;
+
+  subscribe((event, data) => {
+    if (event === 'updated' && typeof data === 'object') {
+      handleSkillContentUpdate(data as Skill);
+    }
+  });
+
+  log.log(' Skill hot-reload enabled');
+}
+
+/**
+ * Handle skill content update - hot restart all agents using this skill
+ */
+async function handleSkillContentUpdate(skill: Skill): Promise<void> {
+  if (!agentServiceRef || !claudeServiceRef || !broadcastRef) {
+    log.error(' Skill hot-reload not initialized');
+    return;
+  }
+
+  // Find all agents that use this skill (directly or via class)
+  const allAgents = agentServiceRef.getAllAgents();
+  const affectedAgents = allAgents.filter(agent => {
+    // Check direct assignment
+    if (skill.assignedAgentIds.includes(agent.id)) return true;
+    // Check class assignment
+    if (skill.assignedAgentClasses.includes(agent.class as AgentClass)) return true;
+    return false;
+  });
+
+  if (affectedAgents.length === 0) {
+    log.log(` Skill "${skill.name}" updated, no agents affected`);
+    return;
+  }
+
+  log.log(` Skill "${skill.name}" updated, hot-restarting ${affectedAgents.length} agent(s)`);
+
+  for (const agent of affectedAgents) {
+    // Only restart agents with active sessions
+    if (!agent.sessionId) {
+      log.log(` Agent ${agent.name}: No active session, skill will apply on next start`);
+      continue;
+    }
+
+    try {
+      // Stop the current Claude process
+      await claudeServiceRef.stopAgent(agent.id);
+
+      // Mark as idle (resume will happen on next command with new skills in system prompt)
+      agentServiceRef.updateAgent(agent.id, {
+        status: 'idle',
+        currentTask: undefined,
+        currentTool: undefined,
+        // Keep sessionId! This allows --resume to work with updated skill content
+      }, false);
+
+      // Send activity notification
+      broadcastRef({
+        type: 'activity',
+        payload: {
+          agentId: agent.id,
+          message: `Skill "${skill.name}" updated - context preserved`,
+        },
+      });
+
+      log.log(` Agent ${agent.name}: Hot-restarted for skill update`);
+    } catch (err) {
+      log.error(` Failed to hot-restart agent ${agent.name} after skill update:`, err);
+    }
+  }
 }
 
 // Export skill service as a singleton-like object for consistency

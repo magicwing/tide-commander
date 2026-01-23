@@ -63,6 +63,9 @@ async function main(): Promise<void> {
   // Initialize WebSocket
   websocket.init(server);
 
+  // Set up skill hot-reload (must be after websocket init to have broadcast available)
+  skillService.setupSkillHotReload(agentService, claudeService, websocket.broadcast);
+
   // Start server
   server.listen(Number(PORT), HOST, () => {
     logger.server.log(`Server running on http://${HOST}:${PORT}`);

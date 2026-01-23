@@ -301,6 +301,18 @@ export async function handleUpdateAgentProperties(
   const modelChanged = updates.model !== undefined && updates.model !== agent.model;
   const sessionId = agent.sessionId; // Save before update
 
+  // Track if skills changed (requires hot restart to apply new skills in system prompt)
+  let skillsChanged = false;
+  if (updates.skillIds !== undefined) {
+    const currentSkills = skillService.getSkillsForAgent(agentId, agent.class);
+    const currentDirectSkillIds = currentSkills
+      .filter(s => s.assignedAgentIds.includes(agentId))
+      .map(s => s.id)
+      .sort();
+    const newSkillIds = [...updates.skillIds].sort();
+    skillsChanged = JSON.stringify(currentDirectSkillIds) !== JSON.stringify(newSkillIds);
+  }
+
   // Update agent properties
   const agentUpdates: Partial<Agent> = {};
 
@@ -366,6 +378,33 @@ export async function handleUpdateAgentProperties(
     // Then assign the new skills
     for (const skillId of updates.skillIds) {
       skillService.assignSkillToAgent(skillId, agentId);
+    }
+
+    // If skills changed and we didn't already hot restart for model change, do it now
+    // Skills are injected into the system prompt, so we need to restart to apply them
+    if (skillsChanged && !modelChanged && sessionId) {
+      log.log(`Agent ${agent.name}: Skills changed, hot restarting with --resume to apply new system prompt`);
+      try {
+        // Stop the current Claude process
+        await claudeService.stopAgent(agentId);
+
+        // Mark as idle temporarily (the resume will happen on next command)
+        // Keep sessionId to allow resume with new skills in system prompt
+        agentService.updateAgent(agentId, {
+          status: 'idle',
+          currentTask: undefined,
+          currentTool: undefined,
+          // Keep sessionId! This allows --resume to work with updated skills
+        }, false);
+
+        const newSkillCount = updates.skillIds.length;
+        ctx.sendActivity(agentId, `Skills updated (${newSkillCount} skill${newSkillCount !== 1 ? 's' : ''}) - context preserved`);
+      } catch (err) {
+        log.error(`Failed to hot restart agent ${agent.name} after skill change:`, err);
+      }
+    } else if (skillsChanged && !sessionId) {
+      // No existing session, skills will apply on next start
+      log.log(`Agent ${agent.name}: Skills changed, will apply on next session start`);
     }
   }
 
