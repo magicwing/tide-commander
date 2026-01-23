@@ -465,8 +465,9 @@ export function ClaudeOutputPanel() {
     }
   };
 
-  // Track the previous agent ID to detect agent switches
+  // Track the previous agent ID and sessionId to detect agent switches vs session establishment
   const prevAgentIdRef = useRef<string | null>(null);
+  const prevHasSessionIdRef = useRef<boolean>(false);
 
   // Load conversation history when agent changes or on reconnect
   // IMPORTANT: We do NOT clear outputs during normal streaming - only when:
@@ -478,6 +479,8 @@ export function ClaudeOutputPanel() {
       setHistory([]);
       setHasMore(false);
       setTotalCount(0);
+      setLoadingHistory(false);
+      prevHasSessionIdRef.current = false;
       return;
     }
 
@@ -486,8 +489,13 @@ export function ClaudeOutputPanel() {
     const isReconnect = reconnectCount > 0;
     const shouldClearOutputs = isAgentSwitch || isReconnect;
 
-    // Update the ref AFTER we check it
+    // Detect if session was just established for the current agent (not an agent switch)
+    // This happens when user sends a command to an idle agent - we don't want to show loading
+    const isSessionEstablishment = !isAgentSwitch && !prevHasSessionIdRef.current && hasSessionId;
+
+    // Update the refs AFTER we check them
     prevAgentIdRef.current = selectedAgentId;
+    prevHasSessionIdRef.current = hasSessionId;
 
     // On reconnect, preserve current outputs BEFORE fetching new history
     // This ensures we don't lose any messages that weren't persisted to the JSONL file yet
@@ -499,7 +507,11 @@ export function ClaudeOutputPanel() {
       }
     }
 
-    setLoadingHistory(true);
+    // Only show loading indicator on agent switch or reconnect, not on session establishment
+    // This prevents flicker when sending a command to an agent that was idle
+    if (!isSessionEstablishment) {
+      setLoadingHistory(true);
+    }
     fetch(`/api/agents/${selectedAgentId}/history?limit=${MESSAGES_PER_PAGE}&offset=0`)
       .then((res) => {
         if (!res.ok) {
@@ -968,7 +980,7 @@ export function ClaudeOutputPanel() {
             </>
           ) : loadingHistory ? (
             <div className="guake-empty">Loading history...</div>
-          ) : history.length === 0 && outputs.length === 0 ? (
+          ) : history.length === 0 && outputs.length === 0 && selectedAgent?.status !== 'working' ? (
             <div className="guake-empty">No output yet. Send a command to this agent.</div>
           ) : (
             <>

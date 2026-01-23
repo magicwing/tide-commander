@@ -355,6 +355,12 @@ async function executeCommand(agentId: string, command: string, systemPrompt?: s
   });
 }
 
+// Timeout for stdin message watchdog (10 seconds)
+const STDIN_ACTIVITY_TIMEOUT_MS = 10000;
+
+// Track active stdin watchdog timers to prevent duplicates
+const stdinWatchdogTimers = new Map<string, NodeJS.Timeout>();
+
 // Public function to send a command - sends directly to running process if busy
 // This allows users to send messages while Claude is working - Claude will see them in stdin
 // systemPrompt is only used when starting a new process (not for messages to running process)
@@ -385,6 +391,12 @@ export async function sendCommand(agentId: string, command: string, systemPrompt
         updateData.lastAssignedTaskTime = Date.now();
       }
       agentService.updateAgent(agentId, updateData);
+
+      // Start stdin activity watchdog
+      // If no activity is received within timeout, the process may be stuck
+      // We'll respawn the process with the same command
+      startStdinWatchdog(agentId, command, systemPrompt, customAgent);
+
       return;
     }
   }
@@ -394,6 +406,62 @@ export async function sendCommand(agentId: string, command: string, systemPrompt
 
   // Agent is idle, sending failed, or we need special options - execute with new process
   await executeCommand(agentId, command, systemPrompt, forceNewSession, customAgent);
+}
+
+/**
+ * Start a watchdog timer for stdin messages
+ * If no activity is received within the timeout, respawn the process
+ */
+function startStdinWatchdog(
+  agentId: string,
+  command: string,
+  systemPrompt?: string,
+  customAgent?: CustomAgentConfig
+): void {
+  if (!runner) return;
+
+  // Clear any existing watchdog for this agent
+  const existingTimer = stdinWatchdogTimers.get(agentId);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+  }
+
+  log.log(`[STDIN-WATCHDOG] Starting watchdog for ${agentId}, timeout=${STDIN_ACTIVITY_TIMEOUT_MS}ms`);
+
+  // Create the watchdog timer
+  const watchdogTimer = setTimeout(async () => {
+    stdinWatchdogTimers.delete(agentId);
+
+    // Check if we received any activity since sending the message
+    if (runner && !runner.hasRecentActivity(agentId, STDIN_ACTIVITY_TIMEOUT_MS)) {
+      log.warn(`[STDIN-WATCHDOG] Agent ${agentId}: No activity after stdin message, respawning process...`);
+
+      // Stop the stuck process
+      await runner.stop(agentId);
+
+      // Respawn with the same command
+      try {
+        await executeCommand(agentId, command, systemPrompt, false, customAgent);
+        log.log(`[STDIN-WATCHDOG] Agent ${agentId}: Successfully respawned process`);
+      } catch (err) {
+        log.error(`[STDIN-WATCHDOG] Agent ${agentId}: Failed to respawn process:`, err);
+      }
+    } else {
+      log.log(`[STDIN-WATCHDOG] Agent ${agentId}: Activity received, watchdog cleared`);
+    }
+  }, STDIN_ACTIVITY_TIMEOUT_MS);
+
+  stdinWatchdogTimers.set(agentId, watchdogTimer);
+
+  // Register callback to clear the watchdog when activity is received
+  runner.onNextActivity(agentId, () => {
+    const timer = stdinWatchdogTimers.get(agentId);
+    if (timer) {
+      clearTimeout(timer);
+      stdinWatchdogTimers.delete(agentId);
+      log.log(`[STDIN-WATCHDOG] Agent ${agentId}: Cleared watchdog on activity`);
+    }
+  });
 }
 
 /**

@@ -213,6 +213,8 @@ export interface ActiveProcess {
   fileReadPosition?: number;  // Current read position in output file
   // Flag indicating this is a reconnected orphan process
   isReconnected?: boolean;
+  // Track last activity time for stdin watchdog (detects stuck processes)
+  lastActivityTime?: number;
 }
 
 // Process death info for diagnostics

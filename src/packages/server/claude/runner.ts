@@ -56,6 +56,9 @@ export class ClaudeRunner {
   // Auto-restart enabled flag
   private autoRestartEnabled = true;
 
+  // Callbacks for activity watchdog (called when next activity is received)
+  private activityCallbacks: Map<string, Array<() => void>> = new Map();
+
   constructor(callbacks: RunnerCallbacks) {
     this.backend = new ClaudeBackend();
     this.callbacks = callbacks;
@@ -609,6 +612,25 @@ export class ClaudeRunner {
    * Handle a normalized event
    */
   private handleEvent(agentId: string, event: StandardEvent): void {
+    // Update last activity time for this agent
+    const activeProcess = this.activeProcesses.get(agentId);
+    if (activeProcess) {
+      activeProcess.lastActivityTime = Date.now();
+    }
+
+    // Trigger any waiting activity callbacks
+    const callbacks = this.activityCallbacks.get(agentId);
+    if (callbacks && callbacks.length > 0) {
+      for (const callback of callbacks) {
+        try {
+          callback();
+        } catch (err) {
+          log.error(`Activity callback error for ${agentId}:`, err);
+        }
+      }
+      this.activityCallbacks.delete(agentId);
+    }
+
     // Send to callback
     this.callbacks.onEvent(agentId, event);
 
@@ -729,6 +751,9 @@ export class ClaudeRunner {
     // Remove from tracking immediately
     this.activeProcesses.delete(agentId);
 
+    // Clear any pending activity callbacks
+    this.activityCallbacks.delete(agentId);
+
     // First, try sending SIGINT (Ctrl+C) which Claude CLI handles gracefully
     if (pid) {
       try {
@@ -839,6 +864,42 @@ export class ClaudeRunner {
    */
   getSessionId(agentId: string): string | undefined {
     return this.activeProcesses.get(agentId)?.sessionId;
+  }
+
+  /**
+   * Check if agent has received activity within the given time window
+   * @param agentId The agent to check
+   * @param withinMs Time window in milliseconds
+   * @returns true if activity was received within the window, false otherwise
+   */
+  hasRecentActivity(agentId: string, withinMs: number): boolean {
+    const activeProcess = this.activeProcesses.get(agentId);
+    if (!activeProcess) {
+      return false;
+    }
+    const lastActivity = activeProcess.lastActivityTime || activeProcess.startTime;
+    return (Date.now() - lastActivity) < withinMs;
+  }
+
+  /**
+   * Register a one-time callback to be called when the next activity is received for an agent
+   * Used by the stdin watchdog to cancel timeout when activity is received
+   * @param agentId The agent to watch
+   * @param callback Function to call when activity is received
+   */
+  onNextActivity(agentId: string, callback: () => void): void {
+    if (!this.activityCallbacks.has(agentId)) {
+      this.activityCallbacks.set(agentId, []);
+    }
+    this.activityCallbacks.get(agentId)!.push(callback);
+  }
+
+  /**
+   * Clear all pending activity callbacks for an agent
+   * Called when process is stopped to clean up
+   */
+  clearActivityCallbacks(agentId: string): void {
+    this.activityCallbacks.delete(agentId);
   }
 
   /**

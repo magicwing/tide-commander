@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.2] - 2026-01-22
+
+> ⚠️ **EXPERIMENTAL RELEASE** - This version includes new features that require testing:
+> - The stdin watchdog auto-respawn feature may cause unexpected behavior in some edge cases
+> - History loading may occasionally fail when switching to an agent - refresh if this occurs
+
+### Added
+- **Stdin Activity Watchdog** (EXPERIMENTAL) - Detects stuck processes and auto-respawns them
+  - 10 second timeout after sending stdin message
+  - If no activity received, process is killed and respawned with same command
+  - Activity callbacks system in ClaudeRunner to track process responsiveness
+
+### Fixed
+- History loading flicker when sending command to idle agent (session establishment)
+- "No output yet" message showing briefly while agent is working
+- Track session establishment separately from agent switches to avoid unnecessary loading states
+
+### Changed
+- ClaudeOutputPanel now tracks both agentId and sessionId changes separately
+- Added `lastActivityTime` tracking to ActiveProcess for watchdog feature
+
 ## [0.8.1] - 2026-01-22
 
 ### Added
